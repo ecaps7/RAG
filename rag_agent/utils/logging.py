@@ -1,9 +1,15 @@
+"""Logging utilities with trace ID support and colored output."""
+
+from __future__ import annotations
+
 import logging
 import sys
 from typing import Optional
 
 
 class TraceAdapter(logging.LoggerAdapter):
+    """Logger adapter that prepends trace ID to messages."""
+    
     def __init__(self, logger: logging.Logger, trace_id: Optional[str]):
         super().__init__(logger, {"trace_id": trace_id})
 
@@ -14,12 +20,14 @@ class TraceAdapter(logging.LoggerAdapter):
 
 
 class ColorFormatter(logging.Formatter):
+    """Formatter that adds ANSI colors to log messages."""
+    
     COLORS = {
-        logging.DEBUG: "\x1b[36m",   # Cyan
-        logging.INFO: "\x1b[32m",    # Green
-        logging.WARNING: "\x1b[33m", # Yellow
-        logging.ERROR: "\x1b[31m",   # Red
-        logging.CRITICAL: "\x1b[41m",# Red background
+        logging.DEBUG: "\x1b[36m",    # Cyan
+        logging.INFO: "\x1b[32m",     # Green
+        logging.WARNING: "\x1b[33m",  # Yellow
+        logging.ERROR: "\x1b[31m",    # Red
+        logging.CRITICAL: "\x1b[41m", # Red background
     }
 
     def format(self, record: logging.LogRecord) -> str:
@@ -30,6 +38,15 @@ class ColorFormatter(logging.Formatter):
 
 
 def get_logger(name: str, trace_id: Optional[str] = None) -> logging.LoggerAdapter:
+    """Get a logger with optional trace ID support.
+    
+    Args:
+        name: Logger name (typically __class__.__name__)
+        trace_id: Optional trace ID for request tracking
+        
+    Returns:
+        A LoggerAdapter with trace ID support
+    """
     logger = logging.getLogger(name)
     if not logger.handlers:
         handler = logging.StreamHandler(stream=sys.stderr)

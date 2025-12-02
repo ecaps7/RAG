@@ -1,14 +1,16 @@
+"""Short-term memory for multi-turn conversations."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from ..common.config import get_config, init_model_with_config
+from ..config import get_config, init_model_with_config
 
 
 _REWRITE_PROMPT = (
     "你是查询改写助手。根据以下多轮对话，重写用户最后的问题，使其自包含：\n"
     "- 保留实体与时间范围；\n"
-    "- 补齐指代（如‘它/这/上述’）；\n"
+    "- 补齐指代（如'它/这/上述'）；\n"
     "- 不要编造信息；\n"
     "- 只输出改写后的问题文本。"
 )

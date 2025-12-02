@@ -1,3 +1,5 @@
+"""Core data types for the RAG agent."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,6 +8,7 @@ from typing import Dict, List, Literal, Optional
 
 
 class Intent(str, Enum):
+    """User intent classification categories."""
     data_lookup = "data_lookup"
     definition_lookup = "definition_lookup"
     reasoning = "reasoning"
@@ -19,6 +22,7 @@ SourceType = Literal["local", "web"]
 
 @dataclass
 class ContextChunk:
+    """A chunk of context retrieved from local or web sources."""
     id: str
     content: str
     source_type: SourceType
@@ -33,6 +37,7 @@ class ContextChunk:
 
 @dataclass
 class RetrievalPlan:
+    """Plan for retrieval based on intent classification."""
     use_local: bool
     use_web: bool
     local_top_k: int = 5
@@ -42,12 +47,14 @@ class RetrievalPlan:
 
 @dataclass
 class FusionResult:
+    """Result of fusing chunks from multiple sources."""
     selected_chunks: List[ContextChunk]
     scores: Dict[str, float]
 
 
 @dataclass
 class Answer:
+    """Final answer with citations and confidence."""
     text: str
     citations: List[str]
     confidence: float

@@ -1,1 +1,0 @@
-"""Retrievers for local (PDF/Vector) and web search."""

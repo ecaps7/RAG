@@ -1,9 +1,56 @@
-"""RAG Agent package.
+"""RAG Agent - A modular Retrieval-Augmented Generation system.
 
-Provides an end-to-end pipeline: intent classification → routing → retrieval →
-confidence fusion → answer generation.
+This package provides:
+- Intent-based query routing
+- Hybrid retrieval (BM25 + Vector search)
+- Multi-source fusion with MMR diversity
+- LLM-powered answer generation with citations
+- Short-term memory for multi-turn conversations
+
+Main entry point:
+    from rag_agent import RagAgent
+    
+    agent = RagAgent()
+    answer = agent.run("你的问题")
 """
 
+# Suppress jieba's pkg_resources deprecation warning
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="jieba")
+
+from .agent import RagAgent
+from .core.types import (
+    Intent,
+    SourceType,
+    ContextChunk,
+    RetrievalPlan,
+    FusionResult,
+    Answer,
+)
+from .core.exceptions import (
+    RagAgentError,
+    ConfigurationError,
+    RetrievalError,
+    GenerationError,
+    ClassificationError,
+)
+
+__version__ = "0.2.0"
+
 __all__ = [
-    "pipeline",
+    # Main agent
+    "RagAgent",
+    # Types
+    "Intent",
+    "SourceType",
+    "ContextChunk",
+    "RetrievalPlan",
+    "FusionResult",
+    "Answer",
+    # Exceptions
+    "RagAgentError",
+    "ConfigurationError",
+    "RetrievalError",
+    "GenerationError",
+    "ClassificationError",
 ]

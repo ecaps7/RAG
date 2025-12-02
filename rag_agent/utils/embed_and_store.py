@@ -2,7 +2,7 @@ import os
 import json
 import argparse
 from typing import List, Dict
-from ..common.logging import get_logger
+from .logging import get_logger
 
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings

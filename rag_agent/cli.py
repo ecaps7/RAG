@@ -8,7 +8,7 @@ import csv
 import warnings
 import logging
 
-# 在导入 pipeline 之前抑制外部库告警，以避免模块导入阶段就输出 warning
+# Suppress external library warnings before importing pipeline
 try:
     warnings.filterwarnings("ignore", category=UserWarning, module="jieba._compat")
     warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API", category=UserWarning)
@@ -20,15 +20,15 @@ try:
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     try:
         import jieba  # type: ignore
-        jieba.setLogLevel(logging.ERROR)  # suppress verbose build logs
+        jieba.setLogLevel(logging.ERROR)
     except Exception:
         pass
 except Exception:
     pass
 
 from typing import List
-from .pipeline import RagAgent
-from .memory.short_term import rewrite_question
+from .agent import RagAgent
+from .memory import rewrite_question
 
 
 def main():

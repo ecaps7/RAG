@@ -1,14 +1,21 @@
+"""Vector search operations with MMR support."""
+
 from __future__ import annotations
 
 from typing import Any, List, Optional, Tuple
 
 from langchain_core.documents import Document
 
-from ..common.config import get_config
-from ..common.utils import compute_overlap_ratio
+from ...config import get_config
+from ...utils.text import compute_overlap_ratio
 
 
-def _similarity_search_with_score_safe(store: Any, query: str, k: int) -> Tuple[List[Document], List[float]]:
+def _similarity_search_with_score_safe(
+    store: Any,
+    query: str,
+    k: int
+) -> Tuple[List[Document], List[float]]:
+    """Safe similarity search with score fallback."""
     try:
         pairs = store.similarity_search_with_score(query, k=k)
         docs = [doc for doc, _ in pairs]
@@ -19,15 +26,40 @@ def _similarity_search_with_score_safe(store: Any, query: str, k: int) -> Tuple[
         return docs, [0.0] * len(docs)
 
 
-def _mmr_search_safe(store: Any, query: str, k: int, fetch_k: int, lambda_mult: float) -> List[Document]:
+def _mmr_search_safe(
+    store: Any,
+    query: str,
+    k: int,
+    fetch_k: int,
+    lambda_mult: float
+) -> List[Document]:
+    """Safe MMR search with empty fallback."""
     try:
-        return store.max_marginal_relevance_search(query, k=k, fetch_k=fetch_k, lambda_mult=lambda_mult)
+        return store.max_marginal_relevance_search(
+            query,
+            k=k,
+            fetch_k=fetch_k,
+            lambda_mult=lambda_mult
+        )
     except Exception:
         return []
 
 
-def retrieve(vector_store: Any, query: str, k: Optional[int] = None) -> Tuple[List[Document], dict | None]:
-    """执行简化检索：优先 MMR，回退普通相似度搜索；返回 docs 与轻量诊断。"""
+def retrieve(
+    vector_store: Any,
+    query: str,
+    k: Optional[int] = None
+) -> Tuple[List[Document], dict | None]:
+    """Execute vector retrieval with MMR or similarity search.
+    
+    Args:
+        vector_store: The vector store to search
+        query: The search query
+        k: Maximum number of results
+        
+    Returns:
+        Tuple of (documents, diagnostics)
+    """
     cfg = get_config()
     kk = int(k) if isinstance(k, int) and k and k > 0 else int(cfg.top_k_retrieval)
 
