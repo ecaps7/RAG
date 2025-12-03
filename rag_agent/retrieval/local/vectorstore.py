@@ -29,7 +29,46 @@ except Exception:
 
 
 _VECTOR_STORE_CACHE = None
+_EMBEDDINGS_CACHE: dict[str, HuggingFaceEmbeddings] = {}
 _LOGGER = get_logger("VectorStore")
+
+
+def get_or_create_embeddings(model_name: str | None = None) -> HuggingFaceEmbeddings:
+    """Get or create cached HuggingFace embeddings model.
+    
+    This avoids reloading the model on every request, which is the main
+    performance bottleneck (~9s per load for Qwen3-Embedding-0.6B).
+    
+    Args:
+        model_name: HuggingFace model name. If None, uses config default.
+        
+    Returns:
+        Cached HuggingFaceEmbeddings instance
+    """
+    import time
+    from ...utils.debug import is_debug_enabled
+    
+    if model_name is None:
+        cfg = get_config()
+        model_name = cfg.hf_model
+    
+    if model_name in _EMBEDDINGS_CACHE:
+        _LOGGER.info(f"Using cached embedding model: {model_name}")
+        if is_debug_enabled():
+            print(f"  🔄 Using cached embedding model: {model_name}", flush=True)
+        return _EMBEDDINGS_CACHE[model_name]
+    
+    _LOGGER.info(f"Loading embedding model: {model_name} ...")
+    if is_debug_enabled():
+        print(f"  ⏳ Loading embedding model: {model_name} ...", flush=True)
+    start_time = time.time()
+    _EMBEDDINGS_CACHE[model_name] = HuggingFaceEmbeddings(model_name=model_name)
+    elapsed = time.time() - start_time
+    _LOGGER.info(f"Embedding model loaded: {model_name} (took {elapsed:.2f}s)")
+    if is_debug_enabled():
+        print(f"  ✅ Embedding model loaded: {model_name} (took {elapsed:.2f}s)", flush=True)
+    
+    return _EMBEDDINGS_CACHE[model_name]
 
 
 def get_or_create_vector_store() -> Any:
@@ -44,8 +83,12 @@ def get_or_create_vector_store() -> Any:
     Returns:
         Vector store instance (FAISS or InMemoryVectorStore)
     """
+    from ...utils.debug import is_debug_enabled
+    
     global _VECTOR_STORE_CACHE
     if _VECTOR_STORE_CACHE is not None:
+        if is_debug_enabled():
+            print(f"  🔄 Using cached vector store (skipping model reload)", flush=True)
         return _VECTOR_STORE_CACHE
 
     cfg = get_config()
@@ -57,7 +100,7 @@ def get_or_create_vector_store() -> Any:
         try:
             if not _FAISS_AVAILABLE:
                 raise RuntimeError("FAISS not available")
-            embeddings = HuggingFaceEmbeddings(model_name=cfg.hf_model)
+            embeddings = get_or_create_embeddings(cfg.hf_model)
             vector_store = FAISS.load_local(
                 vs_path,
                 embeddings,
@@ -101,7 +144,7 @@ def get_or_create_vector_store() -> Any:
         try:
             if not _FAISS_AVAILABLE:
                 raise RuntimeError("FAISS not available")
-            embeddings = HuggingFaceEmbeddings(model_name=cfg.hf_model)
+            embeddings = get_or_create_embeddings(cfg.hf_model)
             vector_store = FAISS.load_local(
                 vs_path,
                 embeddings,
@@ -134,7 +177,7 @@ def get_or_create_vector_store() -> Any:
                 enable_dedup=True,
             )
     else:
-        embeddings = HuggingFaceEmbeddings(model_name=cfg.hf_model)
+        embeddings = get_or_create_embeddings(cfg.hf_model)
         if InMemoryVectorStore is not None:
             vector_store = InMemoryVectorStore(embeddings)
         else:

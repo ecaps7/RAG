@@ -10,6 +10,46 @@ except Exception:
     CrossEncoder = None  # type: ignore
 
 
+# Cache for cross-encoder models
+_CROSS_ENCODER_CACHE: dict[str, "CrossEncoder"] = {}
+
+
+def get_or_create_cross_encoder(model_name: str) -> "CrossEncoder | None":
+    """Get or create a cached cross-encoder model.
+    
+    This avoids reloading the model on every rerank call (~9s per load).
+    
+    Args:
+        model_name: Name of the cross-encoder model
+        
+    Returns:
+        Cached CrossEncoder instance or None if unavailable
+    """
+    import time
+    from ..utils.debug import is_debug_enabled
+    
+    if CrossEncoder is None:
+        return None
+    
+    if model_name in _CROSS_ENCODER_CACHE:
+        if is_debug_enabled():
+            print(f"  🔄 Using cached cross-encoder: {model_name}", flush=True)
+        return _CROSS_ENCODER_CACHE[model_name]
+    
+    try:
+        if is_debug_enabled():
+            print(f"  ⏳ Loading cross-encoder: {model_name} ...", flush=True)
+        start_time = time.time()
+        model = CrossEncoder(model_name)
+        elapsed = time.time() - start_time
+        _CROSS_ENCODER_CACHE[model_name] = model
+        if is_debug_enabled():
+            print(f"  ✅ Cross-encoder loaded: {model_name} (took {elapsed:.2f}s)", flush=True)
+        return model
+    except Exception:
+        return None
+
+
 def cross_encoder_rerank(
     query: str,
     pairs: List[Tuple[str, object]],
@@ -26,10 +66,11 @@ def cross_encoder_rerank(
         List of (score, doc_text, payload) tuples, sorted by score descending.
         Returns empty list if library or model is unavailable.
     """
-    if CrossEncoder is None:
+    model = get_or_create_cross_encoder(model_name)
+    if model is None:
         return []
+    
     try:
-        model = CrossEncoder(model_name)
         inputs = [(query, text) for (text, _payload) in pairs]
         scores = model.predict(inputs)
         ranked = sorted(

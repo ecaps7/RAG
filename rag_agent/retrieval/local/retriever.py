@@ -104,6 +104,9 @@ class LocalRetriever:
         Returns:
             List of ContextChunk objects
         """
+        import time
+        from ...utils.debug import is_debug_enabled
+        
         if not getattr(self, "_available", False):
             self.logger.info("Local retrieval not available; returning empty list.")
             return []
@@ -112,15 +115,20 @@ class LocalRetriever:
         cached = self._cache_get(query, top_k)
         if cached is not None:
             self.logger.info("Cache hit: %d chunks", len(cached))
+            if is_debug_enabled():
+                print(f"  🔄 Query cache hit: {len(cached)} chunks", flush=True)
             return cached
 
         try:
+            t0 = time.time()
             store = self._get_store()
             if not store:
                 self.logger.info("Vector store unavailable; returning empty list.")
                 return []
+            t_store = time.time() - t0
 
             # 1) BM25 candidates
+            t1 = time.time()
             bm25_docs = []
             try:
                 bm25_idx = self._get_bm25()
@@ -128,9 +136,15 @@ class LocalRetriever:
                     bm25_docs = [d for d, _s in bm25_idx.search(query, k=top_k)]
             except Exception:
                 pass
+            t_bm25 = time.time() - t1
 
             # 2) Vector candidates (MMR)
+            t2 = time.time()
             vec_docs, _diagnostics = self._vector_retrieve(store, query, k=top_k)
+            t_vector = time.time() - t2
+
+            if is_debug_enabled():
+                print(f"  ⏱ Store: {t_store:.2f}s | BM25: {t_bm25:.2f}s | Vector: {t_vector:.2f}s", flush=True)
 
             # 3) Merge and deduplicate
             combined = []
@@ -150,11 +164,14 @@ class LocalRetriever:
             # 4) Cross-encoder reranking (if available)
             cfg = get_config()
             docs_final = combined
+            t_rerank = 0.0
             
             try:
                 if getattr(cfg, "use_cross_encoder", False) and len(combined) > 1:
+                    t3 = time.time()
                     pairs = [(getattr(d, "page_content", ""), d) for d in combined]
                     ranked = self._cross_rerank(query, pairs, getattr(cfg, "cross_encoder_model", ""))
+                    t_rerank = time.time() - t3
                     if ranked:
                         docs_final = [payload for (_score, _text, payload) in ranked]
                     else:
@@ -168,6 +185,10 @@ class LocalRetriever:
                             ),
                             reverse=True,
                         )
+                    if is_debug_enabled() and t_rerank > 0.1:
+                        print(f"  ⏱ Cross-encoder rerank: {t_rerank:.2f}s", flush=True)
+            except Exception:
+                pass
             except Exception:
                 pass
 
