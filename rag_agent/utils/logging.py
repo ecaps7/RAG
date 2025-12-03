@@ -7,8 +7,22 @@ import sys
 from typing import Optional
 
 
+def set_logging_debug_mode(enabled: bool):
+    """Set whether debug mode is enabled for logging (no-op, kept for compatibility)."""
+    pass
+
+
+def is_logging_debug_mode() -> bool:
+    """Check if debug mode is enabled (always returns False, kept for compatibility)."""
+    return False
+
+
 class TraceAdapter(logging.LoggerAdapter):
-    """Logger adapter that prepends trace ID to messages."""
+    """Logger adapter that prepends trace ID to messages.
+    
+    INFO and DEBUG logs are silenced and replaced by colorful debug output.
+    WARNING and ERROR logs are always shown.
+    """
     
     def __init__(self, logger: logging.Logger, trace_id: Optional[str]):
         super().__init__(logger, {"trace_id": trace_id})
@@ -17,6 +31,22 @@ class TraceAdapter(logging.LoggerAdapter):
         trace = self.extra.get("trace_id")
         prefix = f"[trace={trace}] " if trace else ""
         return prefix + str(msg), kwargs
+    
+    def info(self, msg, *args, **kwargs):
+        """INFO logs are silenced (replaced by colorful debug output)."""
+        pass
+    
+    def debug(self, msg, *args, **kwargs):
+        """DEBUG logs are silenced (replaced by colorful debug output)."""
+        pass
+    
+    def warning(self, msg, *args, **kwargs):
+        """Warnings are always shown."""
+        super().warning(msg, *args, **kwargs)
+    
+    def error(self, msg, *args, **kwargs):
+        """Errors are always shown."""
+        super().error(msg, *args, **kwargs)
 
 
 class ColorFormatter(logging.Formatter):
@@ -24,7 +54,7 @@ class ColorFormatter(logging.Formatter):
     
     COLORS = {
         logging.DEBUG: "\x1b[36m",    # Cyan
-        logging.INFO: "\x1b[32m",     # Green
+        logging.INFO: "\x1b[90m",     # Gray (dimmed)
         logging.WARNING: "\x1b[33m",  # Yellow
         logging.ERROR: "\x1b[31m",    # Red
         logging.CRITICAL: "\x1b[41m", # Red background
@@ -37,7 +67,7 @@ class ColorFormatter(logging.Formatter):
         return f"{color}{base}{reset}"
 
 
-def get_logger(name: str, trace_id: Optional[str] = None) -> logging.LoggerAdapter:
+def get_logger(name: str, trace_id: Optional[str] = None) -> TraceAdapter:
     """Get a logger with optional trace ID support.
     
     Args:
@@ -53,7 +83,7 @@ def get_logger(name: str, trace_id: Optional[str] = None) -> logging.LoggerAdapt
         fmt = ColorFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
         handler.setFormatter(fmt)
         logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
+        logger.setLevel(logging.DEBUG)  # Allow all levels, filtering done in adapter
         # Avoid propagating to root to keep format consistent
         logger.propagate = False
     return TraceAdapter(logger, trace_id)

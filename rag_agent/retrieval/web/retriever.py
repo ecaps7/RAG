@@ -9,6 +9,7 @@ from ...config import get_config
 from ...core.types import ContextChunk
 from ...utils.logging import get_logger
 from ...utils.text import compute_overlap_ratio
+from ...utils.tracing import traceable_step
 
 
 class WebRetriever:
@@ -55,6 +56,7 @@ class WebRetriever:
         except Exception:
             return 0.60
 
+    @traceable_step("web_retrieval", run_type="retriever")
     def retrieve(self, query: str, top_k: int) -> List[ContextChunk]:
         """Retrieve relevant chunks from web search.
         

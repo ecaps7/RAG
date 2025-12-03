@@ -10,6 +10,7 @@ from ..config import get_config, init_model_with_config
 from ..core.types import Intent
 from ..core.exceptions import ClassificationError
 from ..utils.logging import get_logger
+from ..utils.tracing import traceable_step
 
 
 # System prompt for strict JSON output
@@ -189,6 +190,7 @@ class IntentClassifier:
             "need_local": need_local,
         }
 
+    @traceable_step("intent_classification", run_type="chain")
     def classify(self, question: str) -> Tuple[Intent, float]:
         """Classify the intent of a question.
         

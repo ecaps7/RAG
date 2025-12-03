@@ -8,6 +8,7 @@ from ..config import TOP_K, get_weights, get_config
 from ..core.types import ContextChunk, FusionResult, Intent
 from ..utils.text import tokenize_zh
 from ..utils.logging import get_logger
+from ..utils.tracing import traceable_step
 
 
 def _score_chunk(ch: ContextChunk, w_sim: float, w_rel: float, w_rec: float) -> float:
@@ -119,6 +120,7 @@ class FusionLayer:
     def __init__(self, trace_id: str | None = None):
         self.logger = get_logger(self.__class__.__name__, trace_id)
 
+    @traceable_step("fusion", run_type="chain")
     def aggregate(
         self,
         local: List[ContextChunk],

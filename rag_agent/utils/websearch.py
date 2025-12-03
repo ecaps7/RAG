@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Any
 
-from ..common.config import get_config, init_model_with_config
+from ..config import get_config, init_model_with_config
 
 # Tavily tool integration
 try:

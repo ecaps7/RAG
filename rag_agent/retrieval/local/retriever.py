@@ -9,6 +9,7 @@ from ...config import get_config, SOURCE_RELIABILITY
 from ...core.types import ContextChunk
 from ...utils.logging import get_logger
 from ...utils.text import compute_overlap_ratio
+from ...utils.tracing import traceable_step
 
 
 class LocalRetriever:
@@ -92,6 +93,7 @@ class LocalRetriever:
             except Exception:
                 break
 
+    @traceable_step("local_retrieval", run_type="retriever")
     def retrieve(self, query: str, top_k: int) -> List[ContextChunk]:
         """Retrieve relevant chunks using hybrid BM25 + vector search.
         

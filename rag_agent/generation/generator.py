@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Iterator
 from ..config import get_config, init_model_with_config
 from ..core.types import Answer, FusionResult
 from ..utils.logging import get_logger
+from ..utils.tracing import traceable_step
 from .prompts import ANSWER_SYSTEM_PROMPT, ANSWER_STREAM_PROMPT
 
 
@@ -125,6 +126,7 @@ class AnswerGenerator:
 
         return Answer(text=body, citations=citations, confidence=conf, meta={"generator": "template"})
 
+    @traceable_step("answer_generation", run_type="llm")
     def generate(self, question: str, fusion: FusionResult) -> Answer:
         """Generate an answer based on the question and fused context.
         

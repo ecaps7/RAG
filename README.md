@@ -111,8 +111,14 @@
 
 - 单次问答（流式输出）：
   - `python -m rag_agent.cli "你的问题"`
+- **调试模式**（显示 pipeline 每层详细日志）：
+  - `python -m rag_agent.cli --debug "你的问题"`
+  - 调试输出包括：意图分类、检索路由、本地/Web 检索结果、融合层排序、生成结果等
+  - 使用不同颜色区分各阶段：🧠 意图(青色)、🔀 路由(黄色)、📚 本地(绿色)、🌐 Web(蓝色)、⚗️ 融合(品红)、✨ 生成(红色)
+  - 每个步骤显示耗时（⏱），最后汇总展示 Timing Breakdown
 - 交互模式（REPL）：
   - `python -m rag_agent.cli`，逐条输入问题，输入 `/q` 退出。
+  - 交互模式也支持调试：`python -m rag_agent.cli --debug`
   - 开启短期记忆（LangGraph 包裹式接入）：
     - `python -m rag_agent.cli --enable-memory`
     - 可选指定会话ID：`--thread-id your-session-id`（默认使用 `--trace-id` 或 `repl`）
@@ -159,6 +165,11 @@
 - 融合层：
   - `FUSION_USE_NORMALIZATION=true`，`FUSION_NORM_METHOD=minmax`
   - `FUSION_USE_MMR=true`，`FUSION_MMR_ALPHA=0.35`，`FUSION_MMR_FETCH_MULTIPLIER=2.5`
+- **可观测性（LangSmith）**：
+  - `LANGCHAIN_TRACING_V2=true`：启用 LangSmith 追踪
+  - `LANGCHAIN_API_KEY=...`：LangSmith API Key
+  - `LANGCHAIN_PROJECT=rag-agent`：LangSmith 项目名称（可选）
+  - 启用后，所有 LLM 调用会自动上报到 LangSmith 控制台
 
 ## 路由与 Top-K
 

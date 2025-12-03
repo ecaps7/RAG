@@ -29,6 +29,7 @@ except Exception:
 from typing import List
 from .agent import RagAgent
 from .memory import rewrite_question
+from .utils.debug import set_debug_mode
 
 
 def main():
@@ -37,6 +38,7 @@ def main():
     # 问题参数改为可选：有则单次运行，无则进入交互模式
     parser.add_argument("question", type=str, nargs="?", help="User question")
     parser.add_argument("--trace-id", type=str, default=None, help="Optional trace id for logging")
+    parser.add_argument("--debug", action="store_true", help="启用调试模式，显示 pipeline 每层的彩色详细日志")
     # 批量模式：从文件读取问题并写 JSONL 输出
     parser.add_argument("--input", type=str, default=None, help="包含问题的文本文件（每行一个问题）")
     parser.add_argument(
@@ -47,6 +49,10 @@ def main():
     parser.add_argument("--enable-memory", action="store_true", help="交互模式开启短期记忆（LangGraph）")
     parser.add_argument("--thread-id", type=str, default=None, help="记忆会话ID（默认使用 trace-id 或 'repl'）")
     args = parser.parse_args()
+
+    # 启用调试模式
+    if args.debug:
+        set_debug_mode(True)
 
     agent = RagAgent(trace_id=args.trace_id)
 
