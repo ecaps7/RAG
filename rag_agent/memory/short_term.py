@@ -63,6 +63,14 @@ def _messages_to_text(messages: List[Any], max_chars: int = 3000) -> str:
 
 
 def build_short_term_memory_graph(agent: Any):
+    """Build a LangGraph state graph with short-term memory for multi-turn conversations.
+    
+    Args:
+        agent: The RagAgent instance to use for answering questions
+        
+    Returns:
+        Compiled StateGraph with in-memory checkpointing
+    """
     from langgraph.graph import StateGraph, MessagesState, START
     from langgraph.checkpoint.memory import InMemorySaver
 
@@ -112,6 +120,14 @@ def build_short_term_memory_graph(agent: Any):
             ]
         }
 
+    # Build the state graph
+    builder = StateGraph(MessagesState)
+    builder.add_node("agent", call_agent)
+    builder.add_edge(START, "agent")
+    mem = InMemorySaver()
+    graph = builder.compile(checkpointer=mem)
+    return graph
+
 
 def rewrite_question(messages: List[Any]) -> str:
     """Rewrite the latest user question using prior conversation for self-contained query.
@@ -153,10 +169,3 @@ def rewrite_question(messages: List[Any]) -> str:
         if not question_text:
             question_text = ""
     return question_text
-
-    builder = StateGraph(MessagesState)
-    builder.add_node("agent", call_agent)
-    builder.add_edge(START, "agent")
-    mem = InMemorySaver()
-    graph = builder.compile(checkpointer=mem)
-    return graph

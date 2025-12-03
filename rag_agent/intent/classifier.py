@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..config import get_config, init_model_with_config
@@ -114,15 +115,22 @@ def _extract_text_content(content: Any) -> str:
 
 
 class IntentClassifier:
-    """LLM-based intent classifier.
+    """LLM-based intent classifier with LRU caching.
     
     Classifies user questions into predefined intents and returns
     a tuple of (Intent, confidence_score).
+    
+    Features:
+    - LRU cache to avoid repeated LLM calls for identical questions
+    - Configurable cache size (default: 128)
     """
 
-    def __init__(self, trace_id: Optional[str] = None):
+    def __init__(self, trace_id: Optional[str] = None, cache_size: int = 128):
         self.logger = get_logger(self.__class__.__name__, trace_id)
         self._trace_id = trace_id or ""
+        self._cache_size = cache_size
+        self._cache: OrderedDict[str, Tuple[Intent, float]] = OrderedDict()
+        
         try:
             cfg = get_config()
             self._model = init_model_with_config(
@@ -131,6 +139,27 @@ class IntentClassifier:
             )
         except Exception as e:
             raise ClassificationError(f"Failed to initialize intent classifier model: {e}")
+
+    def _cache_get(self, question: str) -> Optional[Tuple[Intent, float]]:
+        """Get cached classification result."""
+        key = question.strip().lower()
+        if key in self._cache:
+            # Move to end (most recently used)
+            value = self._cache.pop(key)
+            self._cache[key] = value
+            return value
+        return None
+
+    def _cache_put(self, question: str, intent: Intent, confidence: float) -> None:
+        """Cache a classification result."""
+        key = question.strip().lower()
+        self._cache[key] = (intent, confidence)
+        # Evict oldest entries if cache is full
+        while len(self._cache) > self._cache_size:
+            try:
+                self._cache.popitem(last=False)
+            except KeyError:
+                break
 
     def _classify_raw(self, question: str) -> Dict[str, Any]:
         """Get raw classification result from LLM."""
@@ -194,6 +223,8 @@ class IntentClassifier:
     def classify(self, question: str) -> Tuple[Intent, float]:
         """Classify the intent of a question.
         
+        Uses LRU cache to avoid repeated LLM calls for identical questions.
+        
         Args:
             question: The user's question
             
@@ -204,6 +235,14 @@ class IntentClassifier:
         if not q:
             return (Intent.reasoning, 0.0)
 
+        # Check cache first
+        cached = self._cache_get(q)
+        if cached is not None:
+            intent, conf = cached
+            self.logger.info("Intent=%s conf=%.2f (cached)", intent.value, conf)
+            return cached
+
+        # Call LLM for classification
         data = self._classify_raw(q)
 
         intent_str = str(data.get("intent", "reasoning")).strip().lower()
@@ -214,6 +253,9 @@ class IntentClassifier:
 
         conf = float(data.get("confidence", 0.0))
         conf = max(0.0, min(1.0, conf))
+
+        # Cache the result
+        self._cache_put(q, intent, conf)
 
         self.logger.info("Intent=%s conf=%.2f", intent.value, conf)
         return intent, conf

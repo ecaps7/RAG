@@ -1,4 +1,4 @@
-"""Cross-encoder reranking."""
+"""Cross-encoder reranking with batched inference."""
 
 from __future__ import annotations
 
@@ -12,6 +12,9 @@ except Exception:
 
 # Cache for cross-encoder models
 _CROSS_ENCODER_CACHE: dict[str, "CrossEncoder"] = {}
+
+# Default batch size for inference (tune based on GPU memory)
+DEFAULT_BATCH_SIZE = 32
 
 
 def get_or_create_cross_encoder(model_name: str) -> "CrossEncoder | None":
@@ -53,14 +56,16 @@ def get_or_create_cross_encoder(model_name: str) -> "CrossEncoder | None":
 def cross_encoder_rerank(
     query: str,
     pairs: List[Tuple[str, object]],
-    model_name: str
+    model_name: str,
+    batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> List[Tuple[float, str, object]]:
-    """Rerank (doc_text, payload) pairs using a cross-encoder.
+    """Rerank (doc_text, payload) pairs using a cross-encoder with batched inference.
     
     Args:
         query: The search query
         pairs: List of (doc_text, payload) tuples
         model_name: Name of the cross-encoder model
+        batch_size: Number of pairs to process in each batch (default: 32)
         
     Returns:
         List of (score, doc_text, payload) tuples, sorted by score descending.
@@ -70,11 +75,27 @@ def cross_encoder_rerank(
     if model is None:
         return []
     
+    if not pairs:
+        return []
+    
     try:
         inputs = [(query, text) for (text, _payload) in pairs]
-        scores = model.predict(inputs)
+        
+        # Batched inference to avoid memory issues with large document sets
+        if len(inputs) <= batch_size:
+            # Small enough to process in one batch
+            scores = list(model.predict(inputs))
+        else:
+            # Process in batches
+            scores: List[float] = []
+            for i in range(0, len(inputs), batch_size):
+                batch = inputs[i : i + batch_size]
+                batch_scores = model.predict(batch)
+                scores.extend(list(batch_scores))
+        
+        # Combine scores with original data and sort
         ranked = sorted(
-            zip(list(scores), [t for (t, p) in pairs], [p for (t, p) in pairs]),
+            zip(scores, [t for (t, p) in pairs], [p for (t, p) in pairs]),
             key=lambda x: x[0],
             reverse=True
         )

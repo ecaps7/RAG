@@ -189,8 +189,6 @@ class LocalRetriever:
                         print(f"  ⏱ Cross-encoder rerank: {t_rerank:.2f}s", flush=True)
             except Exception:
                 pass
-            except Exception:
-                pass
 
             # 5) Truncate and convert
             docs_final = docs_final[:top_k]

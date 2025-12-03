@@ -15,10 +15,21 @@ from ...config import get_config
 from ...utils.text import tokenize_zh, normalize_terms, normalize_numbers, SYNONYM_MAP
 
 
+# Cache for computed SHA1 hashes
+_SHA1_CACHE: Dict[int, str] = {}
+
+
 def _sha1_of(obj: Any) -> str:
-    """Compute SHA1 hash of a JSON-serializable object."""
+    """Compute SHA1 hash of a JSON-serializable object (with caching)."""
+    # Use id() for mutable objects that won't change (like SYNONYM_MAP)
+    cache_key = id(obj)
+    if cache_key in _SHA1_CACHE:
+        return _SHA1_CACHE[cache_key]
+    
     s = json.dumps(obj, ensure_ascii=False, sort_keys=True)
-    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+    result = hashlib.sha1(s.encode("utf-8")).hexdigest()
+    _SHA1_CACHE[cache_key] = result
+    return result
 
 
 @dataclass

@@ -29,7 +29,69 @@ except Exception:
 from typing import List
 from .agent import RagAgent
 from .memory import rewrite_question
-from .utils.debug import set_debug_mode
+from .utils.debug import set_debug_mode, is_debug_enabled
+
+
+def warmup_models():
+    """预热模型：预先加载 Embedding 和 Cross-encoder 模型到缓存。
+    
+    这样在用户输入第一个问题时就可以直接使用缓存，无需等待模型加载。
+    """
+    import time
+    from .config import get_config
+    
+    cfg = get_config()
+    debug = is_debug_enabled()
+    
+    if debug:
+        print("\n🔥 预热模型中...")
+    
+    start_total = time.time()
+    
+    # 1. 预热 Embedding 模型 + Vector Store
+    try:
+        from .retrieval.local.vectorstore import get_or_create_vector_store
+        if debug:
+            print("  ⏳ 加载 Embedding 模型和 Vector Store...")
+        t0 = time.time()
+        get_or_create_vector_store()
+        if debug:
+            print(f"  ✅ Vector Store 就绪 (took {time.time() - t0:.2f}s)")
+    except Exception as e:
+        if debug:
+            print(f"  ⚠️ Vector Store 加载失败: {e}")
+    
+    # 2. 预热 Cross-encoder 模型
+    try:
+        from .retrieval.reranker import get_or_create_cross_encoder
+        model_name = getattr(cfg, "cross_encoder_model", "BAAI/bge-reranker-v2-m3")
+        if getattr(cfg, "use_cross_encoder", True):
+            if debug:
+                print(f"  ⏳ 加载 Cross-encoder: {model_name}...")
+            t0 = time.time()
+            get_or_create_cross_encoder(model_name)
+            if debug:
+                print(f"  ✅ Cross-encoder 就绪 (took {time.time() - t0:.2f}s)")
+    except Exception as e:
+        if debug:
+            print(f"  ⚠️ Cross-encoder 加载失败: {e}")
+    
+    # 3. 预热 BM25 索引
+    try:
+        from .retrieval.local.bm25 import get_or_create_bm25_index
+        if debug:
+            print("  ⏳ 加载 BM25 索引...")
+        t0 = time.time()
+        get_or_create_bm25_index()
+        if debug:
+            print(f"  ✅ BM25 索引就绪 (took {time.time() - t0:.2f}s)")
+    except Exception as e:
+        if debug:
+            print(f"  ⚠️ BM25 索引加载失败: {e}")
+    
+    total_time = time.time() - start_total
+    if debug:
+        print(f"🚀 预热完成，总耗时 {total_time:.2f}s\n")
 
 
 def main():
@@ -121,6 +183,8 @@ def main():
 
     # 单次运行（流式输出最终答案）
     if args.question:
+        # 单次运行也预热，这样第一个问题就能快速响应
+        warmup_models()
         stream, citations = agent.run_stream(args.question)
         print("=== Final Answer ===")
         for delta in stream:
@@ -131,7 +195,8 @@ def main():
             print(f"- {c}")
         return
 
-    # 交互式 REPL
+    # 交互式 REPL - 预热模型
+    warmup_models()
     print("RAG Agent 交互模式：输入问题，输入 /q 退出。")
     try:
         if args.enable_memory:

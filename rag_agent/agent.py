@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import time
-from typing import Optional, Iterator, List, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, Iterator, List, Tuple, Callable
 
 from .config import TOP_K
-from .core.types import Answer, Intent
+from .core.types import Answer, Intent, ContextChunk
 from .generation import AnswerGenerator
 from .intent import IntentClassifier, RetrievalRouter
 from .retrieval import LocalRetriever, WebRetriever, FusionLayer
@@ -67,20 +68,13 @@ class RagAgent:
         plan = self.router.plan(intent)
         self._debug.print_routing(plan, intent)
 
-        local_chunks = []
-        web_chunks = []
+        local_chunks: List[ContextChunk] = []
+        web_chunks: List[ContextChunk] = []
 
-        # Step 3: Retrieval
-        if plan.use_local:
-            t0 = time.perf_counter()
-            local_chunks = self.local.retrieve(question, plan.local_top_k)
-            t1 = time.perf_counter()
-            self._debug.print_local_retrieval(local_chunks, question, duration_ms=(t1 - t0) * 1000)
-        if plan.use_web:
-            t0 = time.perf_counter()
-            web_chunks = self.web.retrieve(question, plan.web_top_k)
-            t1 = time.perf_counter()
-            self._debug.print_web_retrieval(web_chunks, question, duration_ms=(t1 - t0) * 1000)
+        # Step 3: Parallel Retrieval
+        local_chunks, web_chunks = self._parallel_retrieve(
+            question, plan, use_local=plan.use_local, use_web=plan.use_web
+        )
 
         # Step 4: Fusion
         t0 = time.perf_counter()
@@ -129,20 +123,13 @@ class RagAgent:
         plan = self.router.plan(intent)
         self._debug.print_routing(plan, intent)
 
-        local_chunks = []
-        web_chunks = []
+        local_chunks: List[ContextChunk] = []
+        web_chunks: List[ContextChunk] = []
 
-        # Step 3: Retrieval
-        if plan.use_local:
-            t0 = time.perf_counter()
-            local_chunks = self.local.retrieve(question, plan.local_top_k)
-            t1 = time.perf_counter()
-            self._debug.print_local_retrieval(local_chunks, question, duration_ms=(t1 - t0) * 1000)
-        if plan.use_web:
-            t0 = time.perf_counter()
-            web_chunks = self.web.retrieve(question, plan.web_top_k)
-            t1 = time.perf_counter()
-            self._debug.print_web_retrieval(web_chunks, question, duration_ms=(t1 - t0) * 1000)
+        # Step 3: Parallel Retrieval
+        local_chunks, web_chunks = self._parallel_retrieve(
+            question, plan, use_local=plan.use_local, use_web=plan.use_web
+        )
 
         # Step 4: Fusion
         t0 = time.perf_counter()
@@ -160,3 +147,134 @@ class RagAgent:
                 citations.append(str(cite))
 
         return stream, citations
+
+    def _parallel_retrieve(
+        self,
+        question: str,
+        plan,
+        use_local: bool = True,
+        use_web: bool = True,
+    ) -> Tuple[List[ContextChunk], List[ContextChunk]]:
+        """Execute local and web retrieval in parallel.
+        
+        Args:
+            question: The user's question
+            plan: The retrieval plan with top_k settings
+            use_local: Whether to use local retrieval
+            use_web: Whether to use web retrieval
+            
+        Returns:
+            Tuple of (local_chunks, web_chunks)
+        """
+        local_chunks: List[ContextChunk] = []
+        web_chunks: List[ContextChunk] = []
+        
+        # If only one source is needed, run directly without threading overhead
+        if use_local and not use_web:
+            t0 = time.perf_counter()
+            local_chunks = self.local.retrieve(question, plan.local_top_k)
+            t1 = time.perf_counter()
+            self._debug.print_local_retrieval(local_chunks, question, duration_ms=(t1 - t0) * 1000)
+            return local_chunks, web_chunks
+        
+        if use_web and not use_local:
+            t0 = time.perf_counter()
+            web_chunks = self.web.retrieve(question, plan.web_top_k)
+            t1 = time.perf_counter()
+            self._debug.print_web_retrieval(web_chunks, question, duration_ms=(t1 - t0) * 1000)
+            return local_chunks, web_chunks
+        
+        if not use_local and not use_web:
+            return local_chunks, web_chunks
+        
+        # Both sources needed - run in parallel
+        # Get current LangSmith run tree to pass as parent to child threads
+        parent_run = None
+        try:
+            from langsmith.run_helpers import get_current_run_tree
+            parent_run = get_current_run_tree()
+        except Exception:
+            pass
+        
+        local_result: List[ContextChunk] = []
+        web_result: List[ContextChunk] = []
+        local_duration_ms = 0.0
+        web_duration_ms = 0.0
+        
+        def do_local() -> Tuple[List[ContextChunk], float]:
+            # Create a child trace under the parent run
+            from .utils.tracing import _is_langsmith_enabled
+            try:
+                if _is_langsmith_enabled() and parent_run is not None:
+                    from langsmith import trace as langsmith_trace
+                    with langsmith_trace(
+                        name="local_retrieval",
+                        run_type="retriever",
+                        parent=parent_run,
+                    ):
+                        t0 = time.perf_counter()
+                        chunks = self.local.retrieve(question, plan.local_top_k)
+                        duration = (time.perf_counter() - t0) * 1000
+                        return chunks, duration
+            except Exception:
+                pass
+            # Fallback without tracing
+            t0 = time.perf_counter()
+            chunks = self.local.retrieve(question, plan.local_top_k)
+            duration = (time.perf_counter() - t0) * 1000
+            return chunks, duration
+        
+        def do_web() -> Tuple[List[ContextChunk], float]:
+            # Create a child trace under the parent run
+            from .utils.tracing import _is_langsmith_enabled
+            try:
+                if _is_langsmith_enabled() and parent_run is not None:
+                    from langsmith import trace as langsmith_trace
+                    with langsmith_trace(
+                        name="web_retrieval",
+                        run_type="retriever",
+                        parent=parent_run,
+                    ):
+                        t0 = time.perf_counter()
+                        chunks = self.web.retrieve(question, plan.web_top_k)
+                        duration = (time.perf_counter() - t0) * 1000
+                        return chunks, duration
+            except Exception:
+                pass
+            # Fallback without tracing
+            t0 = time.perf_counter()
+            chunks = self.web.retrieve(question, plan.web_top_k)
+            duration = (time.perf_counter() - t0) * 1000
+            return chunks, duration
+        
+        t_start = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {
+                executor.submit(do_local): "local",
+                executor.submit(do_web): "web",
+            }
+            for future in as_completed(futures):
+                source = futures[future]
+                try:
+                    result, duration = future.result()
+                    if source == "local":
+                        local_result = result
+                        local_duration_ms = duration
+                    else:
+                        web_result = result
+                        web_duration_ms = duration
+                except Exception as e:
+                    self.logger.warning("Parallel retrieval failed for %s: %s", source, e)
+        
+        t_total = (time.perf_counter() - t_start) * 1000
+        
+        # Debug output (sequential timing info for each source)
+        self._debug.print_local_retrieval(local_result, question, duration_ms=local_duration_ms)
+        self._debug.print_web_retrieval(web_result, question, duration_ms=web_duration_ms)
+        self.logger.info(
+            "Parallel retrieval completed: local=%d web=%d total=%.1fms (saved ~%.1fms)",
+            len(local_result), len(web_result), t_total,
+            max(0, local_duration_ms + web_duration_ms - t_total)
+        )
+        
+        return local_result, web_result
