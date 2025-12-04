@@ -48,7 +48,8 @@ def _mmr_search_safe(
 def retrieve(
     vector_store: Any,
     query: str,
-    k: Optional[int] = None
+    k: Optional[int] = None,
+    lambda_mult: Optional[float] = None,
 ) -> Tuple[List[Document], dict | None]:
     """Execute vector retrieval with MMR or similarity search.
     
@@ -56,6 +57,8 @@ def retrieve(
         vector_store: The vector store to search
         query: The search query
         k: Maximum number of results
+        lambda_mult: Optional override for MMR lambda multiplier (0-1).
+                     Higher values (e.g. 0.8) favor relevance over diversity.
         
     Returns:
         Tuple of (documents, diagnostics)
@@ -65,9 +68,15 @@ def retrieve(
 
     if getattr(cfg, "use_mmr", True):
         fetch_k = max(kk, int(max(1.0, float(getattr(cfg, "mmr_fetch_multiplier", 3.0))) * kk))
-        lambda_mult = float(getattr(cfg, "mmr_lambda_mult", 0.3))
+        
+        # Use provided lambda_mult or fallback to config
+        if lambda_mult is not None:
+            lm = float(lambda_mult)
+        else:
+            lm = float(getattr(cfg, "mmr_lambda_mult", 0.3))
+            
         candidate_docs, candidate_scores = _similarity_search_with_score_safe(vector_store, query, fetch_k)
-        docs = _mmr_search_safe(vector_store, query, kk, fetch_k, lambda_mult) or candidate_docs[:kk]
+        docs = _mmr_search_safe(vector_store, query, kk, fetch_k, lm) or candidate_docs[:kk]
         scores = candidate_scores
     else:
         docs, scores = _similarity_search_with_score_safe(vector_store, query, kk)
