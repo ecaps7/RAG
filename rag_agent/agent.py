@@ -65,7 +65,7 @@ class RagAgent:
         self._debug.print_intent(intent, intent_conf, duration_ms=(t1 - t0) * 1000)
         
         # Step 2: Retrieval Routing
-        plan = self.router.plan(intent)
+        plan = self.router.plan(intent, question)
         self._debug.print_routing(plan, intent)
 
         local_chunks: List[ContextChunk] = []
@@ -78,7 +78,15 @@ class RagAgent:
 
         # Step 4: Fusion
         t0 = time.perf_counter()
-        fusion = self.fusion.aggregate(local_chunks, web_chunks, intent, k=TOP_K["fusion"])
+        # Increase fusion k for comparison queries
+        fusion_k = TOP_K["fusion"]
+        try:
+            from .retrieval.local.table_aware import is_comparison_query
+            if is_comparison_query(question):
+                fusion_k = max(fusion_k, 8)  # At least 8 chunks for comparison queries
+        except ImportError:
+            pass
+        fusion = self.fusion.aggregate(local_chunks, web_chunks, intent, k=fusion_k, query=question)
         t1 = time.perf_counter()
         self._debug.print_fusion(fusion, len(local_chunks), len(web_chunks), duration_ms=(t1 - t0) * 1000)
         
@@ -120,7 +128,7 @@ class RagAgent:
         self._debug.print_intent(intent, intent_conf, duration_ms=(t1 - t0) * 1000)
         
         # Step 2: Retrieval Routing
-        plan = self.router.plan(intent)
+        plan = self.router.plan(intent, question)
         self._debug.print_routing(plan, intent)
 
         local_chunks: List[ContextChunk] = []
@@ -133,7 +141,15 @@ class RagAgent:
 
         # Step 4: Fusion
         t0 = time.perf_counter()
-        fusion = self.fusion.aggregate(local_chunks, web_chunks, intent, k=TOP_K["fusion"])
+        # Increase fusion k for comparison queries
+        fusion_k = TOP_K["fusion"]
+        try:
+            from .retrieval.local.table_aware import is_comparison_query
+            if is_comparison_query(question):
+                fusion_k = max(fusion_k, 8)  # At least 8 chunks for comparison queries
+        except ImportError:
+            pass
+        fusion = self.fusion.aggregate(local_chunks, web_chunks, intent, k=fusion_k, query=question)
         t1 = time.perf_counter()
         self._debug.print_fusion(fusion, len(local_chunks), len(web_chunks), duration_ms=(t1 - t0) * 1000)
         

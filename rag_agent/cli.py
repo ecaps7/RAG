@@ -65,13 +65,18 @@ def warmup_models():
     try:
         from .retrieval.reranker import get_or_create_cross_encoder
         model_name = getattr(cfg, "cross_encoder_model", "BAAI/bge-reranker-v2-m3")
-        if getattr(cfg, "use_cross_encoder", True):
+        backend = getattr(cfg, "reranker_backend", "ollama")
+        
+        if getattr(cfg, "use_cross_encoder", True) and backend == "cross_encoder":
             if debug:
                 print(f"  ⏳ 加载 Cross-encoder: {model_name}...")
             t0 = time.time()
             get_or_create_cross_encoder(model_name)
             if debug:
                 print(f"  ✅ Cross-encoder 就绪 (took {time.time() - t0:.2f}s)")
+        elif getattr(cfg, "use_cross_encoder", True) and backend == "ollama" and debug:
+             print(f"  ℹ️ 使用 Ollama Reranker ({getattr(cfg, 'ollama_reranker_model', 'bge-m3:567m')})，跳过本地模型加载")
+             
     except Exception as e:
         if debug:
             print(f"  ⚠️ Cross-encoder 加载失败: {e}")

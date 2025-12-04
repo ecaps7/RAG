@@ -1,12 +1,30 @@
 import os
 import json
 import argparse
-from typing import List, Dict
+from typing import List, Dict, Any
 from .logging import get_logger
 
 from langchain_core.documents import Document
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_core.vectorstores import InMemoryVectorStore
+
+# Support both HuggingFace and Ollama embeddings
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+    _HF_AVAILABLE = True
+except ImportError:
+    HuggingFaceEmbeddings = None  # type: ignore
+    _HF_AVAILABLE = False
+
+try:
+    from langchain_ollama import OllamaEmbeddings
+    _OLLAMA_AVAILABLE = True
+except ImportError:
+    OllamaEmbeddings = None  # type: ignore
+    _OLLAMA_AVAILABLE = False
+
+try:
+    from langchain_core.vectorstores import InMemoryVectorStore
+except ImportError:
+    InMemoryVectorStore = None  # type: ignore
 
 try:
     from langchain_community.vectorstores import FAISS
@@ -55,18 +73,46 @@ def dedup_by_sha1(docs: List[Document]) -> List[Document]:
     return uniq
 
 
-def build_embeddings(hf_model: str) -> HuggingFaceEmbeddings:
-    return HuggingFaceEmbeddings(model_name=hf_model)
+def build_embeddings(
+    hf_model: str = None,
+    backend: str = "ollama",
+    ollama_model: str = "qwen3-embedding:0.6b",
+    ollama_base_url: str = "http://localhost:11434",
+) -> Any:
+    """Build embeddings model (Ollama or HuggingFace).
+    
+    Args:
+        hf_model: HuggingFace model name (used when backend="huggingface")
+        backend: "ollama" or "huggingface"
+        ollama_model: Ollama model name (used when backend="ollama")
+        ollama_base_url: Ollama server URL
+        
+    Returns:
+        Embeddings instance
+    """
+    if backend == "ollama" and _OLLAMA_AVAILABLE:
+        return OllamaEmbeddings(model=ollama_model, base_url=ollama_base_url)
+    elif _HF_AVAILABLE and hf_model:
+        return HuggingFaceEmbeddings(model_name=hf_model)
+    elif _OLLAMA_AVAILABLE:
+        return OllamaEmbeddings(model=ollama_model, base_url=ollama_base_url)
+    else:
+        raise RuntimeError(
+            "No embedding backend available. "
+            "Install langchain-ollama or langchain-huggingface."
+        )
 
 
-def build_in_memory_store(embeddings: HuggingFaceEmbeddings, docs: List[Document]) -> InMemoryVectorStore:
+def build_in_memory_store(embeddings: Any, docs: List[Document]) -> "InMemoryVectorStore":
+    if InMemoryVectorStore is None:
+        raise RuntimeError("InMemoryVectorStore not available")
     store = InMemoryVectorStore(embeddings)
     store.add_documents(docs)
     return store
 
 
 def build_or_update_faiss(
-    embeddings: HuggingFaceEmbeddings,
+    embeddings: Any,
     docs: List[Document],
     faiss_dir: str,
     rebuild: bool = False,
@@ -97,7 +143,23 @@ def create_vector_store(
     hf_model: str = "Qwen/Qwen3-Embedding-0.6B",
     enable_dedup: bool = False,
     rebuild: bool = False,
+    embedding_backend: str = "ollama",
+    ollama_model: str = "qwen3-embedding:0.6b",
+    ollama_base_url: str = "http://localhost:11434",
 ):
+    """Create vector store with configurable embedding backend.
+    
+    Args:
+        input_files: JSONL files to load
+        backend: Vector store backend ("in_memory" or "faiss")
+        faiss_dir: Directory for FAISS index
+        hf_model: HuggingFace model name (when embedding_backend="huggingface")
+        enable_dedup: Enable deduplication
+        rebuild: Force rebuild of existing index
+        embedding_backend: "ollama" or "huggingface"
+        ollama_model: Ollama model name
+        ollama_base_url: Ollama server URL
+    """
     if input_files is None:
         input_files = ["outputs/all_chunks.jsonl"]
 
@@ -110,8 +172,14 @@ def create_vector_store(
         docs = dedup_by_sha1(docs)
         LOGGER.info("Deduplicated: %d -> %d", before, len(docs))
 
-    embeddings = build_embeddings(hf_model)
-    LOGGER.info("Embedding model: %s", hf_model)
+    embeddings = build_embeddings(
+        hf_model=hf_model,
+        backend=embedding_backend,
+        ollama_model=ollama_model,
+        ollama_base_url=ollama_base_url,
+    )
+    model_info = ollama_model if embedding_backend == "ollama" else hf_model
+    LOGGER.info("Embedding model: %s (backend=%s)", model_info, embedding_backend)
 
     if backend == "in_memory":
         store = build_in_memory_store(embeddings, docs)
@@ -131,8 +199,14 @@ def parse_args():
                     help="Vector store backend. 'in_memory' (non-persistent) or 'faiss' (persistent).")
     ap.add_argument("--faiss_dir", type=str, default="outputs/vector_store",
                     help="Directory to save/load FAISS index when backend=faiss.")
+    ap.add_argument("--embedding_backend", choices=["ollama", "huggingface"], default="ollama",
+                    help="Embedding backend: 'ollama' (local) or 'huggingface'.")
+    ap.add_argument("--ollama_model", type=str, default="qwen3-embedding:0.6b",
+                    help="Ollama embedding model name (when embedding_backend=ollama).")
+    ap.add_argument("--ollama_base_url", type=str, default="http://localhost:11434",
+                    help="Ollama server base URL.")
     ap.add_argument("--hf_model", type=str, default="Qwen/Qwen3-Embedding-0.6B",
-                    help="HF embedding model name.")
+                    help="HF embedding model name (when embedding_backend=huggingface).")
     ap.add_argument("--dedup", action="store_true",
                     help="Enable deduplication by metadata.content_sha1 (if available).")
     ap.add_argument("--demo_query", type=str, default=None,
@@ -166,8 +240,14 @@ def main():
         docs = dedup_by_sha1(docs)
         LOGGER.info("Deduplicated: %d -> %d", before, len(docs))
 
-    embeddings = build_embeddings(args.hf_model)
-    LOGGER.info("Embedding model: %s", args.hf_model)
+    embeddings = build_embeddings(
+        hf_model=args.hf_model,
+        backend=args.embedding_backend,
+        ollama_model=args.ollama_model,
+        ollama_base_url=args.ollama_base_url,
+    )
+    model_info = args.ollama_model if args.embedding_backend == "ollama" else args.hf_model
+    LOGGER.info("Embedding model: %s (backend=%s)", model_info, args.embedding_backend)
 
     if args.backend == "in_memory":
         store = build_in_memory_store(embeddings, docs)

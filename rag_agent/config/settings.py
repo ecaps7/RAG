@@ -43,7 +43,17 @@ class AppConfig:
     vector_store_path: str = os.getenv("VECTOR_STORE_PATH", "outputs/vector_store")
     all_chunks_path: str = os.getenv("ALL_CHUNKS_PATH", "outputs/all_chunks.jsonl")
     rebuild_vector_store: bool = os.getenv("REBUILD_VECTOR_STORE", "false").lower() == "true"
+    
+    # Ollama embedding model (run locally via Ollama)
+    ollama_embed_model: str = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:0.6b")
+    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    
+    # Legacy HuggingFace model config (kept for backward compatibility)
     hf_model: str = os.getenv("HF_EMBED_MODEL", "Qwen/Qwen3-Embedding-0.6B")
+    
+    # Embedding backend: "ollama" or "huggingface"
+    embedding_backend: str = os.getenv("EMBEDDING_BACKEND", "ollama")
+    
     top_k_retrieval: int = int(os.getenv("TOP_K_RETRIEVAL", "8"))
     
     # ===== MMR Settings =====
@@ -55,6 +65,12 @@ class AppConfig:
     use_cross_encoder: bool = os.getenv("USE_CROSS_ENCODER", "true").lower() == "true"
     cross_encoder_model: str = os.getenv("CROSS_ENCODER_MODEL", "BAAI/bge-reranker-v2-m3")
     
+    # Ollama reranker model (alternative to cross-encoder)
+    ollama_reranker_model: str = os.getenv("OLLAMA_RERANKER_MODEL", "bge-m3:567m")
+    
+    # Reranker backend: "ollama" or "cross_encoder"
+    reranker_backend: str = os.getenv("RERANKER_BACKEND", "ollama")
+    
     # ===== BM25 Settings =====
     bm25_index_path: str = os.getenv(
         "BM25_INDEX_PATH",
@@ -62,6 +78,11 @@ class AppConfig:
     )
     bm25_k1: float = float(os.getenv("BM25_K1", "1.5"))
     bm25_b: float = float(os.getenv("BM25_B", "0.75"))
+
+    # ===== LLM Query Expansion =====
+    use_llm_query_expansion: bool = os.getenv("USE_LLM_QUERY_EXPANSION", "true").lower() == "true"
+    ollama_chat_model: str = os.getenv("OLLAMA_CHAT_MODEL", "qwen3:1.7b")
+    query_expansion_count: int = int(os.getenv("QUERY_EXPANSION_COUNT", "3"))
 
     # ===== Chinese Stopwords =====
     zh_stopwords: set[str] = field(default_factory=lambda: {
