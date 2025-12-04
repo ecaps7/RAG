@@ -8,16 +8,62 @@ from typing import List, Set
 import jieba
 
 
-# Synonym mapping for domain-specific terms
+# Synonym mapping for domain-specific terms (used for text normalization)
 SYNONYM_MAP: dict[str, List[str]] = {
     "总资产": ["资产总额", "资产总计", "total assets"],
     "营业收入": ["营业总收入", "营收", "revenue"],
     "净利润": ["净收益", "净收入", "net income"],
-    # Domain extensions
     "净息差": ["净利差", "利差", "nim", "net interest margin"],
     "净利息收入": ["净息收入", "net interest income"],
     "资本充足率": ["car", "capital adequacy ratio"],
 }
+
+
+# Date expression expansion mapping
+# Maps common date expressions to their equivalent forms found in documents
+DATE_EXPANSION_MAP: dict[str, List[str]] = {
+    # Month end expressions  
+    "1月末": ["1月31日"],
+    "2月末": ["2月28日", "2月29日"],
+    "3月末": ["3月31日"],
+    "4月末": ["4月30日"],
+    "5月末": ["5月31日"],
+    "6月末": ["6月30日"],
+    "7月末": ["7月31日"],
+    "8月末": ["8月31日"],
+    "9月末": ["9月30日"],
+    "10月末": ["10月31日"],
+    "11月末": ["11月30日"],
+    "12月末": ["12月31日"],
+    # Quarter end
+    "一季度末": ["3月31日"],
+    "二季度末": ["6月30日"],
+    "三季度末": ["9月30日"],
+    "四季度末": ["12月31日"],
+    # Year expressions
+    "年末": ["12月31日"],
+    "年初": ["1月1日"],
+}
+
+
+def expand_date_expressions(query: str) -> str:
+    """Expand date expressions in query to include equivalent forms.
+    
+    For example: "9月末" -> "9月末 9月30日"
+    
+    Args:
+        query: The original query
+        
+    Returns:
+        Query with expanded date expressions
+    """
+    expanded = query
+    for expr, alternatives in DATE_EXPANSION_MAP.items():
+        if expr in query:
+            additions = [alt for alt in alternatives if alt not in query]
+            if additions:
+                expanded = expanded + " " + " ".join(additions)
+    return expanded
 
 
 def tokenize_zh(text: str) -> List[str]:

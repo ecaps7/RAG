@@ -14,9 +14,9 @@ SOURCE_RELIABILITY: Dict[str, float] = {
 
 # Top-K retrieval settings
 TOP_K: Dict[str, int] = {
-    "local": 5,
+    "local": 12,   # 增加初始召回数量
     "web": 5,
-    "fusion": 6,
+    "fusion": 8,   # 融合后保留更多
 }
 
 
