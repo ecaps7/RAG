@@ -1,12 +1,37 @@
-"""Local retrieval components."""
+"""Local retrieval components with hybrid search."""
 
-from .retriever import LocalRetriever
-from .bm25 import BM25Index, get_or_create_bm25_index
-from .vectorstore import get_or_create_vector_store
+from .search import (
+    # 适配器（兼容 RagAgent）
+    LocalRetriever,
+    # 主搜索引擎
+    HybridSearchEngine,
+    get_search_engine,
+    hybrid_search,
+    # 子组件
+    SQLRouter,
+    VectorSearcher,
+    BM25Searcher,
+    # 融合算法
+    reciprocal_rank_fusion,
+    # 数据类型
+    SearchResult,
+    SQLResult,
+)
 
 __all__ = [
+    # 适配器
     "LocalRetriever",
-    "BM25Index",
-    "get_or_create_bm25_index",
-    "get_or_create_vector_store",
+    # 主引擎
+    "HybridSearchEngine",
+    "get_search_engine",
+    "hybrid_search",
+    # 子组件
+    "SQLRouter",
+    "VectorSearcher",
+    "BM25Searcher",
+    # 融合算法
+    "reciprocal_rank_fusion",
+    # 数据类型
+    "SearchResult",
+    "SQLResult",
 ]

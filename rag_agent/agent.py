@@ -73,7 +73,7 @@ class RagAgent:
 
         # Step 3: Parallel Retrieval
         local_chunks, web_chunks = self._parallel_retrieve(
-            question, plan, use_local=plan.use_local, use_web=plan.use_web
+            question, plan, use_local=plan.use_local, use_web=plan.use_web, intent=intent
         )
 
         # Step 4: Fusion
@@ -136,7 +136,7 @@ class RagAgent:
 
         # Step 3: Parallel Retrieval
         local_chunks, web_chunks = self._parallel_retrieve(
-            question, plan, use_local=plan.use_local, use_web=plan.use_web
+            question, plan, use_local=plan.use_local, use_web=plan.use_web, intent=intent
         )
 
         # Step 4: Fusion
@@ -170,6 +170,7 @@ class RagAgent:
         plan,
         use_local: bool = True,
         use_web: bool = True,
+        intent: Optional[Intent] = None,
     ) -> Tuple[List[ContextChunk], List[ContextChunk]]:
         """Execute local and web retrieval in parallel.
         
@@ -178,6 +179,7 @@ class RagAgent:
             plan: The retrieval plan with top_k settings
             use_local: Whether to use local retrieval
             use_web: Whether to use web retrieval
+            intent: User intent for optimizing search strategy (optional)
             
         Returns:
             Tuple of (local_chunks, web_chunks)
@@ -188,7 +190,7 @@ class RagAgent:
         # If only one source is needed, run directly without threading overhead
         if use_local and not use_web:
             t0 = time.perf_counter()
-            local_chunks = self.local.retrieve(question, plan.local_top_k)
+            local_chunks = self.local.retrieve(question, plan.local_top_k, intent=intent)
             t1 = time.perf_counter()
             self._debug.print_local_retrieval(local_chunks, question, duration_ms=(t1 - t0) * 1000)
             return local_chunks, web_chunks
@@ -229,14 +231,14 @@ class RagAgent:
                         parent=parent_run,
                     ):
                         t0 = time.perf_counter()
-                        chunks = self.local.retrieve(question, plan.local_top_k)
+                        chunks = self.local.retrieve(question, plan.local_top_k, intent=intent)
                         duration = (time.perf_counter() - t0) * 1000
                         return chunks, duration
             except Exception:
                 pass
             # Fallback without tracing
             t0 = time.perf_counter()
-            chunks = self.local.retrieve(question, plan.local_top_k)
+            chunks = self.local.retrieve(question, plan.local_top_k, intent=intent)
             duration = (time.perf_counter() - t0) * 1000
             return chunks, duration
         

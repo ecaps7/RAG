@@ -4,9 +4,21 @@ from .base import BaseRetriever
 from .fusion import FusionLayer
 from .reranker import cross_encoder_rerank
 
-# Local retrieval components
-from .local import LocalRetriever, BM25Index, get_or_create_bm25_index
-from .local.vectorstore import get_or_create_vector_store
+# Local retrieval components - hybrid search engine
+from .local import (
+    # 适配器（兼容 RagAgent）
+    LocalRetriever,
+    # 主搜索引擎
+    HybridSearchEngine,
+    get_search_engine,
+    hybrid_search,
+    SQLRouter,
+    VectorSearcher,
+    BM25Searcher,
+    reciprocal_rank_fusion,
+    SearchResult,
+    SQLResult,
+)
 
 # Web retrieval components
 from .web import WebRetriever
@@ -18,11 +30,17 @@ __all__ = [
     "FusionLayer",
     # Reranking
     "cross_encoder_rerank",
-    # Local retrieval
+    # Local retrieval - hybrid search
     "LocalRetriever",
-    "BM25Index",
-    "get_or_create_bm25_index",
-    "get_or_create_vector_store",
+    "HybridSearchEngine",
+    "get_search_engine",
+    "hybrid_search",
+    "SQLRouter",
+    "VectorSearcher",
+    "BM25Searcher",
+    "reciprocal_rank_fusion",
+    "SearchResult",
+    "SQLResult",
     # Web retrieval
     "WebRetriever",
 ]

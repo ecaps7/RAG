@@ -33,9 +33,10 @@ from .utils.debug import set_debug_mode, is_debug_enabled
 
 
 def warmup_models():
-    """预热模型：预先加载 Embedding 和 Cross-encoder 模型到缓存。
+    """预热模型：预先加载搜索引擎组件到缓存。
     
     这样在用户输入第一个问题时就可以直接使用缓存，无需等待模型加载。
+    使用新的 HybridSearchEngine 架构（整合了 Vector/BM25/SQL）。
     """
     import time
     from .config import get_config
@@ -48,18 +49,21 @@ def warmup_models():
     
     start_total = time.time()
     
-    # 1. 预热 Embedding 模型 + Vector Store
+    # 1. 预热混合搜索引擎（包含 Milvus + BM25 + SQL）
     try:
-        from .retrieval.local.vectorstore import get_or_create_vector_store
+        from .retrieval.local import get_search_engine
         if debug:
-            print("  ⏳ 加载 Embedding 模型和 Vector Store...")
+            print("  ⏳ 加载 HybridSearchEngine (Milvus + BM25 + SQL)...")
         t0 = time.time()
-        get_or_create_vector_store()
+        engine = get_search_engine()
+        # 触发内部组件初始化
+        engine.vector_searcher._ensure_client()
+        engine.bm25_searcher._ensure_loaded()
         if debug:
-            print(f"  ✅ Vector Store 就绪 (took {time.time() - t0:.2f}s)")
+            print(f"  ✅ HybridSearchEngine 就绪 (took {time.time() - t0:.2f}s)")
     except Exception as e:
         if debug:
-            print(f"  ⚠️ Vector Store 加载失败: {e}")
+            print(f"  ⚠️ HybridSearchEngine 加载失败: {e}")
     
     # 2. 预热 Cross-encoder 模型
     try:
@@ -80,19 +84,6 @@ def warmup_models():
     except Exception as e:
         if debug:
             print(f"  ⚠️ Cross-encoder 加载失败: {e}")
-    
-    # 3. 预热 BM25 索引
-    try:
-        from .retrieval.local.bm25 import get_or_create_bm25_index
-        if debug:
-            print("  ⏳ 加载 BM25 索引...")
-        t0 = time.time()
-        get_or_create_bm25_index()
-        if debug:
-            print(f"  ✅ BM25 索引就绪 (took {time.time() - t0:.2f}s)")
-    except Exception as e:
-        if debug:
-            print(f"  ⚠️ BM25 索引加载失败: {e}")
     
     total_time = time.time() - start_total
     if debug:
