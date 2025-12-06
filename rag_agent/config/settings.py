@@ -61,16 +61,6 @@ class AppConfig:
     mmr_lambda_mult: float = float(os.getenv("MMR_LAMBDA_MULT", "0.3"))
     mmr_fetch_multiplier: float = float(os.getenv("MMR_FETCH_MULTIPLIER", "3.0"))
     
-    # ===== Cross-Encoder Reranking =====
-    use_cross_encoder: bool = os.getenv("USE_CROSS_ENCODER", "true").lower() == "true"
-    cross_encoder_model: str = os.getenv("CROSS_ENCODER_MODEL", "BAAI/bge-reranker-v2-m3")
-    
-    # Ollama reranker model (alternative to cross-encoder)
-    ollama_reranker_model: str = os.getenv("OLLAMA_RERANKER_MODEL", "bge-m3:567m")
-    
-    # Reranker backend: "ollama" or "cross_encoder"
-    reranker_backend: str = os.getenv("RERANKER_BACKEND", "ollama")
-    
     # ===== BM25 Settings =====
     bm25_index_path: str = os.getenv(
         "BM25_INDEX_PATH",
@@ -93,10 +83,6 @@ class AppConfig:
     # ===== Source Reliability =====
     source_reliability: Dict[str, object] = field(default_factory=lambda: {
         "local": SOURCE_RELIABILITY.get("local", 0.9),
-        "web": {
-            "gov.cn": 0.95,
-            "default": SOURCE_RELIABILITY.get("web", 0.6),
-        },
     })
     
     # ===== Top-K per Source =====

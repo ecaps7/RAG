@@ -8,14 +8,12 @@ from typing import Dict
 # Source reliability scores
 SOURCE_RELIABILITY: Dict[str, float] = {
     "local": 0.9,
-    "web": 0.6,
 }
 
 
 # Top-K retrieval settings
 TOP_K: Dict[str, int] = {
     "local": 12,   # 增加初始召回数量
-    "web": 5,
     "fusion": 8,   # 融合后保留更多
 }
 

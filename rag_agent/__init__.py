@@ -24,7 +24,6 @@ from .core.types import (
     SourceType,
     ContextChunk,
     RetrievalPlan,
-    FusionResult,
     Answer,
 )
 from .core.exceptions import (
@@ -45,7 +44,6 @@ __all__ = [
     "SourceType",
     "ContextChunk",
     "RetrievalPlan",
-    "FusionResult",
     "Answer",
     # Exceptions
     "RagAgentError",

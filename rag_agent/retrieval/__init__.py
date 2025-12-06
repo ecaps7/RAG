@@ -1,46 +1,50 @@
-"""Retrieval module for local and web search."""
+"""Retrieval module for hybrid search (Vector + BM25 + SQL)."""
 
-from .base import BaseRetriever
-from .fusion import FusionLayer
-from .reranker import cross_encoder_rerank
-
-# Local retrieval components - hybrid search engine
-from .local import (
-    # 适配器（兼容 RagAgent）
+from .engine import (
+    # 主检索器
     LocalRetriever,
-    # 主搜索引擎
-    HybridSearchEngine,
-    get_search_engine,
+    # 便捷函数
+    get_retriever,
     hybrid_search,
+)
+
+from .searchers import (
+    # 子组件
     SQLRouter,
     VectorSearcher,
     BM25Searcher,
+)
+
+from .rankers import (
+    # 融合算法
     reciprocal_rank_fusion,
+    RRF_K,
+    # 重排序
+    SemanticReranker,
+)
+
+from .types import (
+    # 数据类型
     SearchResult,
     SQLResult,
 )
 
-# Web retrieval components
-from .web import WebRetriever
-
 __all__ = [
-    # Base
-    "BaseRetriever",
-    # Fusion
-    "FusionLayer",
-    # Reranking
-    "cross_encoder_rerank",
-    # Local retrieval - hybrid search
+    # 主检索器
     "LocalRetriever",
-    "HybridSearchEngine",
-    "get_search_engine",
+    # 便捷函数
+    "get_retriever",
     "hybrid_search",
+    # 子组件
     "SQLRouter",
     "VectorSearcher",
     "BM25Searcher",
+    # 融合算法
     "reciprocal_rank_fusion",
+    "RRF_K",
+    # 重排序
+    "SemanticReranker",
+    # 数据类型
     "SearchResult",
     "SQLResult",
-    # Web retrieval
-    "WebRetriever",
 ]

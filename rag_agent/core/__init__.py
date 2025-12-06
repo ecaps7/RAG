@@ -5,7 +5,6 @@ from .types import (
     SourceType,
     ContextChunk,
     RetrievalPlan,
-    FusionResult,
     Answer,
 )
 from .interfaces import Retriever, IntentClassifierProtocol, Generator

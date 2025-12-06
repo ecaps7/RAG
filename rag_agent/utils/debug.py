@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from ..core.types import Answer, ContextChunk, FusionResult, Intent, RetrievalPlan
+from ..core.types import Answer, ContextChunk, Intent, RetrievalPlan
 
 
 # ANSI color codes
@@ -174,11 +174,7 @@ class DebugPrinter:
         color = STAGE_COLORS["router"]
         self._header("router", "🔀 RETRIEVAL ROUTING")
         
-        local_status = _colored("✓ ON", Colors.GREEN) if plan.use_local else _colored("✗ OFF", Colors.RED)
-        web_status = _colored("✓ ON", Colors.GREEN) if plan.use_web else _colored("✗ OFF", Colors.RED)
-        
-        self._kv("Local Retrieval", f"{local_status} (top_k={plan.local_top_k})")
-        self._kv("Web Retrieval", f"{web_status} (top_k={plan.web_top_k})")
+        self._kv("Local Retrieval", f"top_k={plan.local_top_k}")
         self._kv("Strategy", plan.hybrid_strategy)
         self._kv("Based on Intent", _colored(intent.value, color))
     
@@ -206,49 +202,24 @@ class DebugPrinter:
             content_preview = _truncate(ch.content or "", 100)
             self._kv("Content", _dim(content_preview), indent=6)
     
-    def print_web_retrieval(self, chunks: List[ContextChunk], query: str, duration_ms: Optional[float] = None):
-        """Print web retrieval results."""
-        if not self.enabled:
-            return
-        color = STAGE_COLORS["web"]
-        self._header("web", f"🌐 WEB RETRIEVAL ({len(chunks)} chunks)", duration_ms)
-        if duration_ms:
-            self.record_step_time("web_retrieval", duration_ms)
-        
-        if not chunks:
-            self._print(f"  {_dim('No chunks retrieved')}")
-            return
-        
-        for i, ch in enumerate(chunks, 1):
-            self._print()
-            self._print(f"  {_colored(f'[{i}]', color)} {_bold(ch.title or 'untitled')}")
-            self._kv("ID", ch.id, indent=6)
-            self._kv("URL", ch.source_id, indent=6)
-            self._kv("Domain", ch.metadata.get("domain", "N/A"), indent=6)
-            self._kv("Similarity", f"{ch.similarity:.3f}", indent=6)
-            self._kv("Reliability", f"{ch.reliability:.2f}", indent=6)
-            self._kv("Recency", f"{ch.recency:.2f}", indent=6)
-            content_preview = _truncate(ch.content or "", 100)
-            self._kv("Content", _dim(content_preview), indent=6)
-    
-    def print_fusion(self, fusion: FusionResult, local_count: int, web_count: int, duration_ms: Optional[float] = None):
-        """Print fusion layer results."""
+    def print_fusion(self, chunks: List[ContextChunk], input_count: int, duration_ms: Optional[float] = None):
+        """Print fusion/retrieval results."""
         if not self.enabled:
             return
         color = STAGE_COLORS["fusion"]
-        self._header("fusion", f"⚗️  FUSION LAYER ({len(fusion.selected_chunks)} selected)", duration_ms)
+        self._header("fusion", f"⚗️  FUSION LAYER ({len(chunks)} selected)", duration_ms)
         if duration_ms:
             self.record_step_time("fusion", duration_ms)
         
-        self._kv("Input", f"{local_count} local + {web_count} web = {local_count + web_count} total")
-        self._kv("Output", f"{len(fusion.selected_chunks)} chunks after fusion")
+        self._kv("Input", f"{input_count} chunks")
+        self._kv("Output", f"{len(chunks)} chunks after fusion")
         
-        if not fusion.selected_chunks:
+        if not chunks:
             self._print(f"  {_dim('No chunks after fusion')}")
             return
         
         # Score statistics
-        scores = [fusion.scores.get(ch.id, 0.0) for ch in fusion.selected_chunks]
+        scores = [ch.similarity for ch in chunks]
         if scores:
             avg_score = sum(scores) / len(scores)
             max_score = max(scores)
@@ -258,8 +229,8 @@ class DebugPrinter:
         
         self._print()
         self._print(f"  {_dim('Ranked chunks:')}")
-        for i, ch in enumerate(fusion.selected_chunks, 1):
-            score = fusion.scores.get(ch.id, 0.0)
+        for i, ch in enumerate(chunks, 1):
+            score = ch.similarity
             src_icon = "📚" if ch.source_type == "local" else "🌐"
             score_bar = "█" * int(score * 10) + "░" * (10 - int(score * 10))
             title = _truncate(ch.title or ch.source_id or "untitled", 40)
@@ -312,8 +283,7 @@ class DebugPrinter:
         
         self._kv("Intent", meta.get("intent", "N/A"))
         self._kv("Intent Confidence", meta.get("intent_confidence", "N/A"))
-        self._kv("Local Chunks", meta.get("local_chunks", "0"))
-        self._kv("Web Chunks", meta.get("web_chunks", "0"))
+        self._kv("Chunks Retrieved", meta.get("chunks_retrieved", meta.get("local_chunks", "0")))
         self._kv("Final Confidence", f"{answer.confidence:.2%}")
         self._kv("Citations Count", len(answer.citations))
         self._kv("Answer Length", f"{len(answer.text)} chars")

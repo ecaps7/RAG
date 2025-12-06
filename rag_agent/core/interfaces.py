@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Dict, Iterator, List, Protocol, Tuple, Any
 
-from .types import Answer, ContextChunk, FusionResult, Intent
+from .types import Answer, ContextChunk, Intent
 
 
 class Retriever(Protocol):
@@ -31,26 +31,12 @@ class IntentClassifierProtocol(Protocol):
 class Generator(Protocol):
     """Protocol for answer generator implementations."""
     
-    def generate(self, question: str, fusion: FusionResult) -> Answer:
-        """Generate an answer based on the question and fused context."""
+    def generate(self, question: str, chunks: List[ContextChunk]) -> Answer:
+        """Generate an answer based on the question and retrieved chunks."""
         ...
     
-    def stream_answer_text(self, question: str, fusion: FusionResult) -> Iterator[str]:
+    def stream_answer_text(self, question: str, chunks: List[ContextChunk]) -> Iterator[str]:
         """Stream the answer text token by token."""
-        ...
-
-
-class FusionLayerProtocol(Protocol):
-    """Protocol for fusion layer implementations."""
-    
-    def aggregate(
-        self,
-        local: List[ContextChunk],
-        web: List[ContextChunk],
-        intent: Intent,
-        k: int | None = None,
-    ) -> FusionResult:
-        """Aggregate and rank chunks from multiple sources."""
         ...
 
 

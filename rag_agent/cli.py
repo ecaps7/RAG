@@ -36,12 +36,10 @@ def warmup_models():
     """预热模型：预先加载搜索引擎组件到缓存。
     
     这样在用户输入第一个问题时就可以直接使用缓存，无需等待模型加载。
-    使用新的 HybridSearchEngine 架构（整合了 Vector/BM25/SQL）。
+    使用 HybridSearchEngine 架构（整合了 Vector/BM25/SQL）。
     """
     import time
-    from .config import get_config
     
-    cfg = get_config()
     debug = is_debug_enabled()
     
     if debug:
@@ -49,9 +47,9 @@ def warmup_models():
     
     start_total = time.time()
     
-    # 1. 预热混合搜索引擎（包含 Milvus + BM25 + SQL）
+    # 预热混合搜索引擎（包含 Milvus + BM25 + SQL）
     try:
-        from .retrieval.local import get_search_engine
+        from .retrieval import get_search_engine
         if debug:
             print("  ⏳ 加载 HybridSearchEngine (Milvus + BM25 + SQL)...")
         t0 = time.time()
@@ -64,26 +62,6 @@ def warmup_models():
     except Exception as e:
         if debug:
             print(f"  ⚠️ HybridSearchEngine 加载失败: {e}")
-    
-    # 2. 预热 Cross-encoder 模型
-    try:
-        from .retrieval.reranker import get_or_create_cross_encoder
-        model_name = getattr(cfg, "cross_encoder_model", "BAAI/bge-reranker-v2-m3")
-        backend = getattr(cfg, "reranker_backend", "ollama")
-        
-        if getattr(cfg, "use_cross_encoder", True) and backend == "cross_encoder":
-            if debug:
-                print(f"  ⏳ 加载 Cross-encoder: {model_name}...")
-            t0 = time.time()
-            get_or_create_cross_encoder(model_name)
-            if debug:
-                print(f"  ✅ Cross-encoder 就绪 (took {time.time() - t0:.2f}s)")
-        elif getattr(cfg, "use_cross_encoder", True) and backend == "ollama" and debug:
-             print(f"  ℹ️ 使用 Ollama Reranker ({getattr(cfg, 'ollama_reranker_model', 'bge-m3:567m')})，跳过本地模型加载")
-             
-    except Exception as e:
-        if debug:
-            print(f"  ⚠️ Cross-encoder 加载失败: {e}")
     
     total_time = time.time() - start_total
     if debug:

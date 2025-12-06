@@ -38,18 +38,8 @@ class ContextChunk:
 @dataclass
 class RetrievalPlan:
     """Plan for retrieval based on intent classification."""
-    use_local: bool
-    use_web: bool
     local_top_k: int = 5
-    web_top_k: int = 5
     hybrid_strategy: Literal["merge", "interleave", "balance"] = "balance"
-
-
-@dataclass
-class FusionResult:
-    """Result of fusing chunks from multiple sources."""
-    selected_chunks: List[ContextChunk]
-    scores: Dict[str, float]
 
 
 @dataclass

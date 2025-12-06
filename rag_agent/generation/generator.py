@@ -7,7 +7,7 @@ import re
 from typing import Any, Dict, List, Optional, Iterator
 
 from ..config import get_config, init_model_with_config
-from ..core.types import Answer, FusionResult
+from ..core.types import Answer, ContextChunk
 from ..utils.logging import get_logger
 from ..utils.tracing import traceable_step
 from .prompts import ANSWER_SYSTEM_PROMPT, ANSWER_STREAM_PROMPT
@@ -78,10 +78,10 @@ class AnswerGenerator:
             self.logger.info("AnswerGenerator LLM init failed; will use fallback. (%s)", e)
             self._model = None
 
-    def _format_contexts(self, fusion: FusionResult) -> List[Dict[str, Any]]:
-        """Format fusion result as context list for LLM."""
+    def _format_contexts(self, chunks: List[ContextChunk]) -> List[Dict[str, Any]]:
+        """Format chunks as context list for LLM."""
         ctxs: List[Dict[str, Any]] = []
-        for ch in fusion.selected_chunks:
+        for ch in chunks:
             cite = ch.citation or ch.title or ch.source_id
             content = (ch.content or "").strip().replace("\n", " ")
             if len(content) > 1200:
@@ -92,17 +92,16 @@ class AnswerGenerator:
                 "source_id": ch.source_id,
                 "title": ch.title or "",
                 "citation": cite or "",
-                "score": float(fusion.scores.get(ch.id, 0.0)),
-                "similarity": float(getattr(ch, "similarity", 0.0) or 0.0),
-                "reliability": float(getattr(ch, "reliability", 0.5) or 0.5),
-                "recency": float(getattr(ch, "recency", 0.5) or 0.5),
+                "score": ch.similarity,
+                "similarity": ch.similarity,
+                "reliability": ch.reliability,
+                "recency": ch.recency,
                 "content": content,
             })
         return ctxs
 
-    def _fallback_answer(self, question: str, fusion: FusionResult) -> Answer:
+    def _fallback_answer(self, question: str, chunks: List[ContextChunk]) -> Answer:
         """Generate fallback answer when LLM is unavailable."""
-        chunks = fusion.selected_chunks
         citations: List[str] = []
         parts: List[str] = []
         
@@ -122,17 +121,17 @@ class AnswerGenerator:
 
         conf = 0.0
         if chunks:
-            conf = sum(fusion.scores.get(ch.id, 0.0) for ch in chunks) / len(chunks)
+            conf = sum(ch.similarity for ch in chunks) / len(chunks)
 
         return Answer(text=body, citations=citations, confidence=conf, meta={"generator": "template"})
 
     @traceable_step("answer_generation", run_type="llm")
-    def generate(self, question: str, fusion: FusionResult) -> Answer:
-        """Generate an answer based on the question and fused context.
+    def generate(self, question: str, chunks: List[ContextChunk]) -> Answer:
+        """Generate an answer based on the question and retrieved chunks.
         
         Args:
             question: The user's question
-            fusion: The fused retrieval results
+            chunks: The retrieved context chunks
             
         Returns:
             Answer object with text, citations, and confidence
@@ -140,10 +139,10 @@ class AnswerGenerator:
         q = (question or "").strip()
         
         if not getattr(self, "_model", None):
-            return self._fallback_answer(q, fusion)
+            return self._fallback_answer(q, chunks)
 
         try:
-            contexts = self._format_contexts(fusion)
+            contexts = self._format_contexts(chunks)
             preview = {
                 "question": q,
                 "contexts": contexts,
@@ -158,11 +157,11 @@ class AnswerGenerator:
             data = _safe_json_loads(raw_text)
         except Exception as e:
             self.logger.info("LLM generation failed; using fallback. (%s)", e)
-            return self._fallback_answer(q, fusion)
+            return self._fallback_answer(q, chunks)
 
         if not isinstance(data, dict):
             self.logger.info("LLM returned non-JSON; using fallback.")
-            return self._fallback_answer(q, fusion)
+            return self._fallback_answer(q, chunks)
 
         # Extract fields
         text = str(data.get("answer", "")).strip()
@@ -176,7 +175,7 @@ class AnswerGenerator:
         if not citations:
             citations = [
                 (ch.citation or ch.title or ch.source_id)
-                for ch in fusion.selected_chunks
+                for ch in chunks
                 if (ch.citation or ch.title or ch.source_id)
             ]
 
@@ -185,21 +184,20 @@ class AnswerGenerator:
         except Exception:
             conf = 0.0
         if conf <= 0.0:
-            chunks = fusion.selected_chunks
-            conf = sum(fusion.scores.get(ch.id, 0.0) for ch in chunks) / (len(chunks) or 1)
+            conf = sum(ch.similarity for ch in chunks) / (len(chunks) or 1)
         conf = max(0.0, min(1.0, conf))
 
         if not text:
-            return self._fallback_answer(q, fusion)
+            return self._fallback_answer(q, chunks)
 
         return Answer(text=text, citations=citations, confidence=conf, meta={"generator": "llm"})
 
-    def stream_answer_text(self, question: str, fusion: FusionResult) -> Iterator[str]:
+    def stream_answer_text(self, question: str, chunks: List[ContextChunk]) -> Iterator[str]:
         """Stream the answer text token by token.
         
         Args:
             question: The user's question
-            fusion: The fused retrieval results
+            chunks: The retrieved context chunks
             
         Yields:
             Text tokens as they are generated
@@ -207,14 +205,14 @@ class AnswerGenerator:
         q = (question or "").strip()
 
         if not getattr(self, "_model", None):
-            fallback = self._fallback_answer(q, fusion)
+            fallback = self._fallback_answer(q, chunks)
             parts = [p for p in re.split(r"(?<=[。！？\.!?])\s+|\n+", fallback.text) if p]
             for i, p in enumerate(parts):
                 yield (p + ("\n" if i < len(parts) - 1 else ""))
             return
 
         try:
-            contexts = self._format_contexts(fusion)
+            contexts = self._format_contexts(chunks)
             preview = {"question": q, "contexts": contexts}
             messages = [
                 {"role": "system", "content": ANSWER_STREAM_PROMPT},
@@ -227,7 +225,7 @@ class AnswerGenerator:
                 yield delta
         except Exception as e:
             self.logger.info("LLM streaming failed; using fallback. (%s)", e)
-            fallback = self._fallback_answer(q, fusion)
+            fallback = self._fallback_answer(q, chunks)
             parts = [p for p in re.split(r"(?<=[。！？\.!?])\s+|\n+", fallback.text) if p]
             for i, p in enumerate(parts):
                 yield (p + ("\n" if i < len(parts) - 1 else ""))
