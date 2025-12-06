@@ -6,6 +6,7 @@ from .types import (
     ContextChunk,
     RetrievalPlan,
     Answer,
+    CitationInfo,
 )
 from .interfaces import Retriever, IntentClassifierProtocol, Generator
 from .exceptions import (
@@ -24,6 +25,7 @@ __all__ = [
     "RetrievalPlan",
     "FusionResult",
     "Answer",
+    "CitationInfo",
     # Interfaces
     "Retriever",
     "IntentClassifierProtocol",

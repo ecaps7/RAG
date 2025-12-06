@@ -179,7 +179,7 @@ class DebugPrinter:
         self._kv("Based on Intent", _colored(intent.value, color))
     
     def print_local_retrieval(self, chunks: List[ContextChunk], query: str, duration_ms: Optional[float] = None):
-        """Print local retrieval results."""
+        """Print local retrieval results summary."""
         if not self.enabled:
             return
         color = STAGE_COLORS["local"]
@@ -191,16 +191,22 @@ class DebugPrinter:
             self._print(f"  {_dim('No chunks retrieved')}")
             return
         
-        for i, ch in enumerate(chunks, 1):
-            self._print()
-            self._print(f"  {_colored(f'[{i}]', color)} {_bold(ch.title or ch.source_id or 'untitled')}")
-            self._kv("ID", ch.id, indent=6)
-            self._kv("Source", ch.source_id, indent=6)
-            self._kv("Similarity", f"{ch.similarity:.3f}", indent=6)
-            self._kv("Reliability", f"{ch.reliability:.2f}", indent=6)
-            self._kv("Citation", ch.citation or "N/A", indent=6)
-            content_preview = _truncate(ch.content or "", 100)
-            self._kv("Content", _dim(content_preview), indent=6)
+        # 只输出汇总信息，不输出每条结果的详情
+        # 统计各类型来源数量
+        sql_count = sum(1 for ch in chunks if ch.source_id == "sql_database")
+        table_count = sum(1 for ch in chunks if ch.metadata.get("doctype") == "table" and ch.source_id != "sql_database")
+        text_count = len(chunks) - sql_count - table_count
+        
+        # 计算相似度统计
+        scores = [ch.similarity for ch in chunks]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        max_score = max(scores) if scores else 0
+        min_score = min(scores) if scores else 0
+        
+        self._kv("SQL 结果", f"{sql_count} 条")
+        self._kv("表格数据", f"{table_count} 条")
+        self._kv("文本数据", f"{text_count} 条")
+        self._kv("相似度", f"avg={avg_score:.3f}, max={max_score:.3f}, min={min_score:.3f}")
     
     def print_fusion(self, chunks: List[ContextChunk], input_count: int, duration_ms: Optional[float] = None):
         """Print fusion/retrieval results."""
@@ -326,3 +332,49 @@ def set_debug_mode(enabled: bool):
 def is_debug_enabled() -> bool:
     """Check if debug mode is enabled."""
     return get_debug_printer().enabled
+
+
+def log_retrieval_step(stage: str, results: List[Any], query: str = "", log_file: str = "retrieval.log"):
+    """Log retrieval results to a file."""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"\n{'='*80}\n")
+            f.write(f"[{timestamp}] Stage: {stage}\n")
+            if query:
+                f.write(f"Query: {query}\n")
+            f.write(f"Result Count: {len(results)}\n")
+            f.write(f"{'-'*80}\n")
+            
+            for i, item in enumerate(results, 1):
+                f.write(f"Item {i}:\n")
+                # Handle SearchResult or ContextChunk or other objects
+                if hasattr(item, 'id'):
+                    f.write(f"  ID: {item.id}\n")
+                
+                # Score/Similarity
+                if hasattr(item, 'score'):
+                    f.write(f"  Score: {item.score}\n")
+                elif hasattr(item, 'similarity'):
+                    f.write(f"  Similarity: {item.similarity}\n")
+                
+                # Source
+                if hasattr(item, 'source'):
+                    f.write(f"  Source: {item.source}\n")
+                elif hasattr(item, 'source_id'):
+                    f.write(f"  Source ID: {item.source_id}\n")
+                
+                # Content
+                if hasattr(item, 'content'):
+                    content = str(item.content).replace('\n', ' ')
+                    if len(content) > 500:
+                        content = content[:500] + "..."
+                    f.write(f"  Content: {content}\n")
+                
+                # Metadata
+                if hasattr(item, 'metadata'):
+                    f.write(f"  Metadata: {item.metadata}\n")
+                f.write("\n")
+    except Exception as e:
+        print(f"Failed to write to log file: {e}", file=sys.stderr)
+

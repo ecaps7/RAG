@@ -8,11 +8,19 @@
 
 from __future__ import annotations
 
-import json
-import re
+import os
+import warnings
 from typing import Dict, List, Optional
 
-import requests
+# 在导入 transformers 之前禁用警告
+warnings.filterwarnings("ignore")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import transformers
+transformers.logging.set_verbosity_error()
 
 from .types import SearchResult
 from . import config
@@ -96,112 +104,176 @@ def reciprocal_rank_fusion(
 
 # ================= 语义重排序 (Reranker) =================
 
-# Qwen3-Reranker 的系统提示和用户提示模板
-QWEN3_RERANKER_SYSTEM_PROMPT = """Judge whether the Document meets the requirements based on the Query and theErta Document provided. Note that the answer can only be "yes" or "no"."""
-
-QWEN3_RERANKER_USER_TEMPLATE = """<Query>
-{query}
-</Query>
-
-<Document>
-{document}
-</Document>"""
-
 
 class SemanticReranker:
     """
-    基于 Ollama Qwen3-Reranker 的语义重排序器
+    基于 HuggingFace Qwen3-Reranker-4B 的语义重排序器
 
-    使用 Ollama API 调用 Qwen3-Reranker 模型，
+    使用 transformers 加载 Qwen/Qwen3-Reranker-4B 模型，
     通过 "yes"/"no" 的 logprobs 计算相关性分数。
     """
 
+    # 类级别缓存，避免重复加载模型
+    _model = None
+    _tokenizer = None
+    _device = None
+
     def __init__(
         self,
-        model: str = config.RERANKER_MODEL,
-        base_url: str = config.OLLAMA_BASE_URL,
+        model_name: str = config.RERANKER_MODEL,
+        device: Optional[str] = None,
+        max_length: int = 8192,
     ):
-        self.model = model
-        self.base_url = base_url.rstrip("/")
-        self.api_url = f"{self.base_url}/api/chat"
+        self.model_name = model_name
+        self.max_length = max_length
         self._model_available: Optional[bool] = None
+        
+        # 确定设备
+        if device is None:
+            if torch.cuda.is_available():
+                self._device_str = "cuda"
+            elif torch.backends.mps.is_available():
+                self._device_str = "mps"
+            else:
+                self._device_str = "cpu"
+        else:
+            self._device_str = device
 
-    def _check_model_available(self) -> bool:
-        """检查 Ollama 服务和模型是否可用"""
-        if self._model_available is not None:
-            return self._model_available
+    def _load_model(self) -> bool:
+        """懒加载模型和分词器（仅从本地加载）"""
+        if SemanticReranker._model is not None:
+            return True
 
         try:
-            resp = requests.get(f"{self.base_url}/api/tags", timeout=5)
-            if resp.status_code == 200:
-                models = resp.json().get("models", [])
-                model_names = [m.get("name", "") for m in models]
-                # 检查模型是否已安装
-                self._model_available = any(
-                    self.model in name or name in self.model for name in model_names
+            logger.info(f"正在从本地加载 Reranker 模型: {self.model_name}...")
+            
+            # 临时禁用所有警告
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                
+                SemanticReranker._tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_name, 
+                    padding_side='left',
+                    trust_remote_code=True,
+                    local_files_only=True,  # 仅从本地加载
                 )
-                if not self._model_available:
-                    logger.warning(
-                        f"Reranker 模型 {self.model} 未安装，请运行: ollama pull {self.model}"
-                    )
-            else:
-                self._model_available = False
+                
+                # 根据设备选择加载方式，使用 dtype 替代已废弃的 torch_dtype
+                if self._device_str == "cuda":
+                    SemanticReranker._model = AutoModelForCausalLM.from_pretrained(
+                        self.model_name,
+                        dtype=torch.float16,
+                        device_map="auto",
+                        trust_remote_code=True,
+                        local_files_only=True,  # 仅从本地加载
+                    ).eval()
+                elif self._device_str == "mps":
+                    SemanticReranker._model = AutoModelForCausalLM.from_pretrained(
+                        self.model_name,
+                        dtype=torch.float16,
+                        trust_remote_code=True,
+                        local_files_only=True,  # 仅从本地加载
+                    ).to("mps").eval()
+                else:
+                    SemanticReranker._model = AutoModelForCausalLM.from_pretrained(
+                        self.model_name,
+                        dtype=torch.float32,
+                        trust_remote_code=True,
+                        local_files_only=True,  # 仅从本地加载
+                    ).eval()
+            
+            SemanticReranker._device = self._device_str
+            logger.info(f"Reranker 模型加载完成，设备: {self._device_str}")
+            return True
+            
         except Exception as e:
-            logger.warning(f"无法连接 Ollama 服务: {e}")
-            self._model_available = False
+            logger.error(f"加载 Reranker 模型失败: {e}")
+            return False
 
+    def _check_model_available(self) -> bool:
+        """检查模型是否可用"""
+        if self._model_available is not None:
+            return self._model_available
+        
+        self._model_available = self._load_model()
         return self._model_available
+
+    def _format_input(self, instruction: str, query: str, doc: str) -> str:
+        """格式化输入"""
+        return f"<Instruct>: {instruction}\n<Query>: {query}\n<Document>: {doc}"
+
+    def _score_batch(self, query: str, documents: List[str], instruction: Optional[str] = None) -> List[float]:
+        """
+        对一批 (query, document) 对进行打分
+        
+        Args:
+            query: 查询文本
+            documents: 文档列表
+            instruction: 任务指令，默认为通用检索指令
+            
+        Returns:
+            分数列表 (0-1)
+        """
+        if not documents:
+            return []
+            
+        if instruction is None:
+            instruction = "Given a query, retrieve relevant passages that answer the query"
+        
+        tokenizer = SemanticReranker._tokenizer
+        model = SemanticReranker._model
+        
+        # 获取 yes/no token ids
+        token_true_id = tokenizer.convert_tokens_to_ids("yes")
+        token_false_id = tokenizer.convert_tokens_to_ids("no")
+        
+        # 构建前缀和后缀
+        prefix = "<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be \"yes\" or \"no\".<|im_end|>\n<|im_start|>user\n"
+        suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+        prefix_tokens = tokenizer.encode(prefix, add_special_tokens=False)
+        suffix_tokens = tokenizer.encode(suffix, add_special_tokens=False)
+        
+        # 格式化所有输入
+        pairs = [self._format_input(instruction, query, doc) for doc in documents]
+        
+        # Tokenize
+        inputs = tokenizer(
+            pairs, 
+            padding=False, 
+            truncation=True,
+            return_attention_mask=False, 
+            max_length=self.max_length - len(prefix_tokens) - len(suffix_tokens)
+        )
+        
+        # 添加前缀和后缀 tokens
+        for i, ele in enumerate(inputs['input_ids']):
+            inputs['input_ids'][i] = prefix_tokens + ele + suffix_tokens
+        
+        # Padding（不传递 max_length 以避免警告）
+        inputs = tokenizer.pad(inputs, padding=True, return_tensors="pt")
+        
+        # 移动到设备
+        device = SemanticReranker._device
+        for key in inputs:
+            inputs[key] = inputs[key].to(device)
+        
+        # 计算分数
+        with torch.no_grad():
+            batch_scores = model(**inputs).logits[:, -1, :]
+            true_vector = batch_scores[:, token_true_id]
+            false_vector = batch_scores[:, token_false_id]
+            batch_scores = torch.stack([false_vector, true_vector], dim=1)
+            batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
+            scores = batch_scores[:, 1].exp().tolist()
+        
+        return scores
 
     def _score_single(self, query: str, document: str) -> float:
         """
         对单个 (query, document) 对进行打分
-
-        通过 Qwen3-Reranker 返回的 logprobs 计算 "yes" 的概率作为相关性分数
         """
-        user_content = QWEN3_RERANKER_USER_TEMPLATE.format(
-            query=query, document=document
-        )
-
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": QWEN3_RERANKER_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            "stream": False,
-            "options": {
-                "num_predict": 1,  # 只需要生成一个 token
-                "temperature": 0,  # 确定性输出
-                "logprobs": True,  # 返回 logprobs
-                "top_logprobs": 10,  # 返回 top 10 logprobs
-            },
-        }
-
-        try:
-            resp = requests.post(self.api_url, json=payload, timeout=30)
-            resp.raise_for_status()
-            result = resp.json()
-
-            # 解析返回的内容
-            message = result.get("message", {})
-            content = message.get("content", "").strip().lower()
-
-            # 方法1: 如果有 logprobs，计算 yes 的概率
-            # Ollama 的 logprobs 格式可能因版本而异
-            # 这里我们使用简化方法：根据输出是 yes 还是 no 来给分
-
-            # 方法2: 简单判断输出
-            if "yes" in content:
-                return 1.0
-            elif "no" in content:
-                return 0.0
-            else:
-                # 无法判断时给中等分数
-                return 0.5
-
-        except Exception as e:
-            logger.error(f"Reranker 调用失败: {e}")
-            return 0.5  # 出错时返回中等分数
+        scores = self._score_batch(query, [document])
+        return scores[0] if scores else 0.3
 
     def rerank(
         self,
@@ -209,6 +281,7 @@ class SemanticReranker:
         candidates: List[SearchResult],
         top_k: int = 10,
         threshold: float = config.RERANKER_THRESHOLD,
+        batch_size: int = 8,
     ) -> List[SearchResult]:
         """
         对候选结果进行重排序
@@ -218,6 +291,7 @@ class SemanticReranker:
             candidates: 候选文档列表
             top_k: 返回前 K 个结果
             threshold: 分数阈值 (0-1)，低于此分数的文档将被丢弃
+            batch_size: 批处理大小
 
         Returns:
             重排序后的 SearchResult 列表
@@ -234,10 +308,10 @@ class SemanticReranker:
             logger.warning("Reranker 不可用，返回原始排序")
             return candidates[:top_k]
 
-        logger.info(f"使用 Ollama Qwen3-Reranker 对 {len(candidates)} 条结果进行重排序...")
+        logger.info(f"使用 Qwen3-Reranker-4B 对 {len(candidates)} 条结果进行重排序...")
 
-        # 对每个候选文档进行打分
-        reranked_results = []
+        # 准备文档文本
+        doc_texts = []
         for doc in candidates:
             # 尝试提取标题或章节信息，拼接到文档内容前
             section_info = doc.metadata.get("section", "") or doc.metadata.get(
@@ -252,9 +326,20 @@ class SemanticReranker:
             # 截断过长的文档（Qwen3-Reranker 建议 8192 tokens 以内）
             if len(doc_text) > 4000:
                 doc_text = doc_text[:4000]
+            
+            doc_texts.append(doc_text)
 
-            # 调用 Ollama API 进行打分
-            score = self._score_single(query, doc_text)
+        # 批量打分
+        all_scores = []
+        for i in range(0, len(doc_texts), batch_size):
+            batch_docs = doc_texts[i:i + batch_size]
+            batch_scores = self._score_batch(query, batch_docs)
+            all_scores.extend(batch_scores)
+
+        # 构建重排序结果
+        reranked_results = []
+        for doc, score in zip(candidates, all_scores):
+            print(f"[Rerank] Doc ID: {doc.id}, Score: {score:.4f}")
 
             # 阈值过滤
             if score < threshold:

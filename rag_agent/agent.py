@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Optional, Iterator, List, Tuple
 
-from .core.types import Answer, Intent, ContextChunk
+from .core.types import Answer, Intent, ContextChunk, CitationInfo
 from .generation import AnswerGenerator
 from .intent import IntentClassifier, RetrievalRouter
 from .retrieval import LocalRetriever
@@ -66,7 +67,7 @@ class RagAgent:
         t0 = time.perf_counter()
         chunks = self.retriever.retrieve(question, 8)
         t1 = time.perf_counter()
-        self._debug.print_local_retrieval(chunks, question, duration_ms=(t1 - t0) * 1000)
+        # self._debug.print_local_retrieval(chunks, question, duration_ms=(t1 - t0) * 1000)
         
         # Step 4: Generation
         t0 = time.perf_counter()
@@ -86,14 +87,16 @@ class RagAgent:
         return answer
 
     @trace_pipeline_stream("rag_pipeline_stream")
-    def run_stream(self, question: str) -> Tuple[Iterator[str], List[str]]:
+    def run_stream(self, question: str) -> Tuple[Iterator[str], List[CitationInfo]]:
         """Run the pipeline and return a streaming answer iterator.
         
         Args:
             question: The user's question
             
         Returns:
-            Tuple of (text_stream_iterator, citations_list)
+            Tuple of (text_stream_iterator, citation_info_list)
+            The citation_info_list contains numbered references that can be filtered
+            based on which [n] markers appear in the generated text.
         """
         # Debug: Print input question
         self._debug.print_question(question)
@@ -117,11 +120,27 @@ class RagAgent:
         # Step 4: Stream generation
         stream = self.generator.stream_answer_text(question, chunks)
 
-        # Extract citations from chunks
-        citations: List[str] = []
-        for ch in chunks:
-            cite = ch.citation or ch.title or ch.source_id
-            if cite:
-                citations.append(str(cite))
+        # Build citation info with numbered references
+        citation_infos: List[CitationInfo] = []
+        for idx, ch in enumerate(chunks, start=1):
+            title = ch.citation or ch.title or ch.source_id or ""
+            # 从 metadata 中提取 page 和 doctype
+            metadata = ch.metadata or {}
+            page = str(metadata.get("page", ""))
+            doc_type = metadata.get("doctype", "text")
+            # SQL 结果特殊处理
+            if ch.source_id == "sql_database":
+                doc_type = "sql"
+            
+            citation_infos.append(CitationInfo(
+                ref=idx,
+                title=str(title),
+                source_id=str(ch.source_id),
+                source_type=ch.source_type,
+                doc_type=doc_type,
+                page=page,
+                score=ch.similarity,
+                reliability=ch.reliability,
+            ))
 
-        return stream, citations
+        return stream, citation_infos

@@ -30,7 +30,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v3.2")
 
 # 输入数据文件
 FILE_TABLE = 'outputs/CMB-2025-q1/CMB-2025-q1-table.json'
-FILE_TEXT = 'outputs/CMB-2025-q1/CMB-2025-q1-text-chunks.json'
+FILE_TEXT = 'outputs/CMB-2025-q1/CMB-2025-q1-text.json'
 
 # 需要提取结构化指标的表格类型（基于 section_path 关键词匹配）
 # 设为 None 表示处理所有表格，让 LLM 自行判断

@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 
 from ..core.types import ContextChunk, Intent
 from ..utils.logging import get_logger
+from ..utils.debug import get_debug_printer, log_retrieval_step
 
 from .config import SQL_DB_PATH, MILVUS_DB_PATH, BM25_INDEX_PATH
 from .types import SearchResult
@@ -34,12 +35,13 @@ class LocalRetriever:
         milvus_db_path: str = MILVUS_DB_PATH,
         bm25_index_path: str = BM25_INDEX_PATH,
         trace_id: Optional[str] = None,
-        use_reranker: bool = False,
+        use_reranker: bool = True,
     ):
         self.sql_router = SQLRouter(sql_db_path)
         self.vector_searcher = VectorSearcher(milvus_db_path)
         self.bm25_searcher = BM25Searcher(bm25_index_path)
         self.logger = get_logger("LocalRetriever", trace_id)
+        self.debug_printer = get_debug_printer()
         self._last_sql_context: Optional[str] = None
 
         # RRF 权重配置
@@ -119,6 +121,7 @@ class LocalRetriever:
                 if sql_search_results:
                     result_lists.append(sql_search_results)
                     weights.append(self.rrf_weights["sql"])
+                    log_retrieval_step("SQL Search", sql_search_results, question)
 
         # 2. 向量搜索
         if use_vector:
@@ -127,6 +130,7 @@ class LocalRetriever:
             if vector_results:
                 result_lists.append(vector_results)
                 weights.append(self.rrf_weights["vector"])
+                log_retrieval_step("Vector Search", vector_results, question)
 
         # 3. BM25 关键词搜索
         if use_bm25:
@@ -135,6 +139,7 @@ class LocalRetriever:
             if bm25_results:
                 result_lists.append(bm25_results)
                 weights.append(self.rrf_weights["bm25"])
+                log_retrieval_step("BM25 Search", bm25_results, question)
 
         # 4. RRF 融合（仅融合非 SQL 结果）
         # SQL 结果单独保存，不参与 RRF 和重排序
@@ -154,6 +159,7 @@ class LocalRetriever:
             fused_results = reciprocal_rank_fusion(
                 non_sql_result_lists, k=RRF_K, weights=non_sql_weights
             )
+            log_retrieval_step("RRF Fusion", fused_results, question)
             # 粗排后取更多结果供重排序使用
             coarse_results = fused_results[: top_k * 3] if self.use_reranker else fused_results[:top_k]
         else:
@@ -163,6 +169,7 @@ class LocalRetriever:
         if self.use_reranker and self.reranker and coarse_results:
             self.logger.info(f"执行语义重排序 (输入 {len(coarse_results)} 条)...")
             search_results = self.reranker.rerank(question, coarse_results, top_k=top_k)
+            log_retrieval_step("Semantic Reranking", search_results, question)
         else:
             search_results = coarse_results[:top_k]
 
@@ -240,7 +247,8 @@ def get_retriever() -> LocalRetriever:
     """获取检索器单例"""
     global _retriever_instance
     if _retriever_instance is None:
-        _retriever_instance = LocalRetriever()
+        # 默认启用语义重排序
+        _retriever_instance = LocalRetriever(use_reranker=True)
     return _retriever_instance
 
 

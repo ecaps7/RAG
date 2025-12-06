@@ -1,8 +1,9 @@
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "database"
+# 项目根目录（rag_agent 的父目录）
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DATA_DIR = PROJECT_ROOT / "database"
 
 # Ensure the data directory exists
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -17,9 +18,8 @@ OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", 4096))
 MILVUS_COLLECTION = "financial_chunks"
 
-# Reranker configurations (Ollama)
-RERANKER_MODEL = os.getenv("RERANKER_MODEL", "dengcao/Qwen3-Reranker-8B:Q5_K_M")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+# Reranker configurations (HuggingFace - Local)
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", str(PROJECT_ROOT / "model" / "Qwen3-Reranker-4B"))
 RERANKER_THRESHOLD = float(os.getenv("RERANKER_THRESHOLD", 0.0))  # Qwen3-Reranker 输出 0-1 之间的分数
 
 # RRF configurations

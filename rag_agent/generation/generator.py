@@ -79,23 +79,23 @@ class AnswerGenerator:
             self._model = None
 
     def _format_contexts(self, chunks: List[ContextChunk]) -> List[Dict[str, Any]]:
-        """Format chunks as context list for LLM."""
+        """Format chunks as context list for LLM with numbered references."""
         ctxs: List[Dict[str, Any]] = []
-        for ch in chunks:
+        for idx, ch in enumerate(chunks, start=1):
             cite = ch.citation or ch.title or ch.source_id
             content = (ch.content or "").strip().replace("\n", " ")
             if len(content) > 1200:
                 content = content[:1200] + "..."
+            
+            # 标注高可信来源
+            is_high_confidence = ch.similarity >= 0.9 or ch.source_type == "sql_database"
+            
             ctxs.append({
-                "id": ch.id,
+                "ref": idx,  # 引用编号，供 LLM 使用 [n] 标记
                 "source_type": ch.source_type,
-                "source_id": ch.source_id,
-                "title": ch.title or "",
-                "citation": cite or "",
-                "score": ch.similarity,
-                "similarity": ch.similarity,
-                "reliability": ch.reliability,
-                "recency": ch.recency,
+                "title": ch.title or cite or "",
+                "score": round(ch.similarity, 3),
+                "high_confidence": is_high_confidence,  # 明确标注高可信来源
                 "content": content,
             })
         return ctxs

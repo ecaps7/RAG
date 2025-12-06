@@ -8,16 +8,27 @@ import csv
 import warnings
 import logging
 
+# Suppress ALL warnings before importing any libraries
+warnings.filterwarnings("ignore")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+
 # Suppress external library warnings before importing pipeline
 try:
     warnings.filterwarnings("ignore", category=UserWarning, module="jieba._compat")
     warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API", category=UserWarning)
+    warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
+    warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
+    warnings.filterwarnings("ignore", message=".*torch_dtype.*is deprecated.*")
+    warnings.filterwarnings("ignore", message=".*max_length.*is ignored.*")
 except Exception:
     pass
 try:
     logging.getLogger("jieba").setLevel(logging.ERROR)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("transformers").setLevel(logging.ERROR)
+    logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
     try:
         import jieba  # type: ignore
         jieba.setLogLevel(logging.ERROR)
@@ -26,17 +37,89 @@ try:
 except Exception:
     pass
 
-from typing import List
+from typing import List, Set
+import re as regex_module
 from .agent import RagAgent
 from .memory import rewrite_question
 from .utils.debug import set_debug_mode, is_debug_enabled
+from .core.types import CitationInfo
+
+
+def extract_cited_refs(text: str) -> Set[int]:
+    """从文本中提取 [n] 格式的引用编号。"""
+    matches = regex_module.findall(r'\[(\d+)\]', text)
+    return {int(m) for m in matches}
+
+
+def format_citations(
+    citation_infos: List[CitationInfo],
+    cited_refs: Set[int],
+    show_all: bool = False
+) -> str:
+    """格式化引用输出。
+    
+    Args:
+        citation_infos: 所有引用信息
+        cited_refs: LLM 实际引用的编号集合
+        show_all: 是否显示所有引用（调试用）
+    
+    Returns:
+        格式化的引用字符串
+    """
+    lines = []
+    lines.append("\n---")
+    lines.append("**📊 数据来源 (References)**\n")
+    
+    cited_count = 0
+    uncited_count = 0
+    
+    for info in citation_infos:
+        if info.ref in cited_refs:
+            cited_count += 1
+            
+            # 根据文档类型确定类型标签
+            if info.doc_type == "sql":
+                type_tag = "[结构化数据]"
+            elif info.doc_type == "table":
+                type_tag = "[表格]"
+            else:
+                type_tag = "[文本]"
+            
+            # 格式化页码信息（仅非 SQL 数据显示）
+            if info.doc_type != "sql" and info.page:
+                page_tag = f" (Page: {info.page})"
+            else:
+                page_tag = ""
+            
+            lines.append(f"* **[{info.ref}]** {type_tag} {info.title}{page_tag}")
+            lines.append("")
+        else:
+            uncited_count += 1
+    
+    if uncited_count > 0:
+        lines.append(f"*(已过滤 {uncited_count} 条未引用的检索源)*")
+    
+    if cited_count == 0:
+        lines.append("*(未检测到引用标记，显示所有检索源)*\n")
+        for info in citation_infos:
+            # 根据文档类型确定类型标签
+            if info.doc_type == "sql":
+                type_tag = "[结构化数据]"
+            elif info.doc_type == "table":
+                type_tag = "[表格]"
+            else:
+                type_tag = "[文本]"
+            page_tag = f" (Page: {info.page})" if info.page and info.doc_type != "sql" else ""
+            lines.append(f"* [{info.ref}] {type_tag} {info.title}{page_tag}")
+    
+    return "\n".join(lines)
 
 
 def warmup_models():
-    """预热模型：预先加载搜索引擎组件到缓存。
+    """预热模型：预先加载搜索引擎组件和 Reranker 模型到缓存。
     
     这样在用户输入第一个问题时就可以直接使用缓存，无需等待模型加载。
-    使用 HybridSearchEngine 架构（整合了 Vector/BM25/SQL）。
+    使用 LocalRetriever 架构（整合了 Vector/BM25/SQL）+ Reranker 模型。
     """
     import time
     
@@ -47,21 +130,36 @@ def warmup_models():
     
     start_total = time.time()
     
-    # 预热混合搜索引擎（包含 Milvus + BM25 + SQL）
+    # 预热本地混合检索器（包含 Milvus + BM25 + SQL）
     try:
-        from .retrieval import get_search_engine
+        from .retrieval import get_retriever
         if debug:
-            print("  ⏳ 加载 HybridSearchEngine (Milvus + BM25 + SQL)...")
+            print("  ⏳ 加载 LocalRetriever (Milvus + BM25 + SQL)...")
         t0 = time.time()
-        engine = get_search_engine()
+        retriever = get_retriever()
         # 触发内部组件初始化
-        engine.vector_searcher._ensure_client()
-        engine.bm25_searcher._ensure_loaded()
+        retriever.vector_searcher._ensure_client()
+        retriever.bm25_searcher._ensure_loaded()
         if debug:
-            print(f"  ✅ HybridSearchEngine 就绪 (took {time.time() - t0:.2f}s)")
+            print(f"  ✅ LocalRetriever 就绪 (took {time.time() - t0:.2f}s)")
     except Exception as e:
         if debug:
-            print(f"  ⚠️ HybridSearchEngine 加载失败: {e}")
+            print(f"  ⚠️ LocalRetriever 加载失败: {e}")
+    
+    # 预热 Reranker 模型（HuggingFace Qwen3-Reranker）
+    try:
+        from .retrieval.rankers import SemanticReranker
+        if debug:
+            print("  ⏳ 加载 Reranker 模型 (Qwen3-Reranker-4B)...")
+        t0 = time.time()
+        reranker = SemanticReranker()
+        # 触发模型加载
+        reranker._load_model()
+        if debug:
+            print(f"  ✅ Reranker 模型就绪 (took {time.time() - t0:.2f}s)")
+    except Exception as e:
+        if debug:
+            print(f"  ⚠️ Reranker 模型加载失败: {e}")
     
     total_time = time.time() - start_total
     if debug:
@@ -159,14 +257,18 @@ def main():
     if args.question:
         # 单次运行也预热，这样第一个问题就能快速响应
         warmup_models()
-        stream, citations = agent.run_stream(args.question)
+        stream, citation_infos = agent.run_stream(args.question)
         print("=== Final Answer ===")
+        final_text_parts: List[str] = []
         for delta in stream:
+            final_text_parts.append(delta)
             print(delta, end="", flush=True)
+        final_text = "".join(final_text_parts)
         print()  # ensure newline after stream
-        print("\n=== Citations ===")
-        for c in citations:
-            print(f"- {c}")
+        
+        # 解析引用并格式化输出
+        cited_refs = extract_cited_refs(final_text)
+        print(format_citations(citation_infos, cited_refs))
         return
 
     # 交互式 REPL - 预热模型
@@ -195,7 +297,7 @@ def main():
                 messages.append({"role": "user", "content": question})
                 rewritten = rewrite_question(messages)
 
-                stream, citations = agent.run_stream(rewritten)
+                stream, citation_infos = agent.run_stream(rewritten)
                 print("=== Final Answer ===")
                 final_text_parts: List[str] = []
                 for delta in stream:
@@ -203,12 +305,10 @@ def main():
                     print(delta, end="", flush=True)
                 final_text = "".join(final_text_parts)
                 print()
-                print("\n=== Citations ===")
-                if citations:
-                    for c in citations:
-                        print(f"- {c}")
-                else:
-                    print("(no citations)")
+                
+                # 解析引用并格式化输出
+                cited_refs = extract_cited_refs(final_text)
+                print(format_citations(citation_infos, cited_refs))
                 print()
 
                 # 将助手消息写入记忆，供后续改写使用
@@ -229,17 +329,18 @@ def main():
                 if question.lower() in {"/q", "q", ":q", "exit", "quit"}:
                     break
 
-                stream, citations = agent.run_stream(question)
+                stream, citation_infos = agent.run_stream(question)
                 print("=== Final Answer ===")
+                final_text_parts: List[str] = []
                 for delta in stream:
+                    final_text_parts.append(delta)
                     print(delta, end="", flush=True)
+                final_text = "".join(final_text_parts)
                 print()
-                print("\n=== Citations ===")
-                if citations:
-                    for c in citations:
-                        print(f"- {c}")
-                else:
-                    print("(no citations)")
+                
+                # 解析引用并格式化输出
+                cited_refs = extract_cited_refs(final_text)
+                print(format_citations(citation_infos, cited_refs))
                 print()
     except Exception as e:
         print(f"发生错误：{e}")
