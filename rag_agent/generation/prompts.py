@@ -1,7 +1,7 @@
 """Prompt templates for answer generation."""
 
 # System prompt for streaming (plain text output with table awareness)
-ANSWER_STREAM_PROMPT = (
+ANSWER_SYSTEM_PROMPT = (
     "你是一个严谨的金融报告问答助手。只根据提供的 contexts 回答问题。\n\n"
     "## 引用规则（最重要）\n"
     "1) **必须使用引用标记**：当引用某个 context 时，在相关文字后使用 [n] 标注（n = context 的 ref 值）。\n"

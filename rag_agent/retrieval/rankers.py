@@ -339,7 +339,7 @@ class SemanticReranker:
         # 构建重排序结果
         reranked_results = []
         for doc, score in zip(candidates, all_scores):
-            print(f"[Rerank] Doc ID: {doc.id}, Score: {score:.4f}")
+            # print(f"[Rerank] Doc ID: {doc.id}, Score: {score:.4f}")
 
             # 阈值过滤
             if score < threshold:

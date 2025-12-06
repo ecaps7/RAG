@@ -10,7 +10,7 @@ from ..config import get_config, init_model_with_config
 from ..core.types import Answer, ContextChunk
 from ..utils.logging import get_logger
 from ..utils.tracing import traceable_step
-from .prompts import ANSWER_SYSTEM_PROMPT, ANSWER_STREAM_PROMPT
+from .prompts import ANSWER_SYSTEM_PROMPT
 
 
 def _safe_json_loads(text: str) -> Optional[Dict[str, Any]]:
@@ -215,7 +215,7 @@ class AnswerGenerator:
             contexts = self._format_contexts(chunks)
             preview = {"question": q, "contexts": contexts}
             messages = [
-                {"role": "system", "content": ANSWER_STREAM_PROMPT},
+                {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
                 {"role": "user", "content": json.dumps(preview, ensure_ascii=False)},
             ]
             for chunk in self._model.stream(messages):
