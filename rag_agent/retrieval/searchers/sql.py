@@ -10,7 +10,8 @@ import sqlite3
 from typing import Any, Dict, List, Optional
 
 from ..config import SQL_DB_PATH
-from rag_agent.config import get_config, init_model_with_config
+from rag_agent.config import get_config
+from rag_agent.llm import llm_services
 from ..types import SQLResult
 from ...utils.logging import get_logger
 
@@ -132,11 +133,9 @@ class SQLRouter:
         self.db_path = db_path
         self.logger = get_logger("SQLRouter")
         try:
-            cfg = get_config()
-            self._model = init_model_with_config(
-                cfg.response_model_name,
-                cfg.response_model_temperature
-            )
+            # Use unified LLM service
+            self._model = llm_services.get_model()
+            self.logger.info("SQLRouter LLM initialized successfully.")
         except Exception as e:
             self.logger.warning("SQLRouter LLM init failed; will use fallback. (%s)", e)
             self._model = None

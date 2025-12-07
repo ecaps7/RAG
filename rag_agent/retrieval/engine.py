@@ -153,7 +153,7 @@ class LocalRetriever:
         else:
             coarse_results = []
 
-        # 5. 可选：语义重排序（仅对非 SQL 结果）
+        # 5. 语义重排序（仅对非 SQL 结果）
         if self.use_reranker and self.reranker and coarse_results:
             self.logger.debug(f"Performing semantic reranking on {len(coarse_results)} results...")
             search_results = self.reranker.rerank(question, coarse_results, top_k=top_k)

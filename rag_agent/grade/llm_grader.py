@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import List, Dict, Optional
 
-from ..config import get_config, init_model_with_config
 from ..core.types import ContextChunk
+from ..llm import llm_services, GradeResult as GradeResultSchema
 from ..utils.logging import get_logger
 from ..utils.tracing import traceable_step
 from .base import BaseGrader, GradeResult
@@ -25,20 +24,8 @@ class LLMBasedGrader(BaseGrader):
         """
         self.relevance_threshold = relevance_threshold
         self.logger = get_logger(self.__class__.__name__, trace_id)
-        self._model = None
-        self._init_model()
-    
-    def _init_model(self):
-        """Initialize the LLM model for grading."""
-        try:
-            cfg = get_config()
-            self._model = init_model_with_config(
-                cfg.response_model_name,
-                cfg.response_model_temperature
-            )
-        except Exception as e:
-            self.logger.error(f"Failed to initialize LLM for grader: {e}")
-            raise
+        # Use unified LLM service with structured output
+        self._model = llm_services.get_structured_model(GradeResultSchema)
     
     def _format_chunk_for_grading(self, chunk: ContextChunk) -> Dict[str, str]:
         """Format a context chunk for grading."""
@@ -78,42 +65,17 @@ Relevance Guidelines:
 - 0.1-0.3: Slightly relevant, contains minimal useful information
 - 0.0: Not relevant at all
 
-Your response must be a valid JSON array containing objects with the following fields:
-- chunk_id: The ID of the chunk
-- relevance_score: The relevance score (0.0-1.0)
-- is_relevant: Whether the chunk should be included (true/false)
-- reasoning: Your detailed reasoning
-- source_type: The source type (sql, vector, bm25, or unknown)
-
 User Question:
 {question}
 
 Retrieved Chunks:
 {chunks}
-
-Please provide your relevance assessment in the required JSON format:
 """.format(
             question=question,
             chunks=json.dumps(formatted_chunks, ensure_ascii=False, indent=2)
         )
         
         return prompt
-    
-    def _parse_llm_response(self, response: str) -> List[Dict[str, any]]:
-        """Parse the LLM's response into grade results."""
-        try:
-            # Extract JSON from response
-            json_match = re.search(r'\[.*?\]', response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
-                return json.loads(json_str)
-            else:
-                # Try to parse the entire response as JSON
-                return json.loads(response)
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse LLM grading response: {e}")
-            self.logger.error(f"Raw response: {response}")
-            raise
     
     @traceable_step("chunk_grading", run_type="llm")
     def grade(self, question: str, chunks: List[ContextChunk]) -> List[GradeResult]:
@@ -128,46 +90,33 @@ Please provide your relevance assessment in the required JSON format:
         """
         if not chunks:
             return []
-            
-        if not self._model:
-            self._init_model()
         
         try:
             # Generate grading prompt
             prompt = self._generate_grading_prompt(question, chunks)
             
-            # Get LLM response
+            # Get LLM response with structured output
             messages = [
-                {"role": "system", "content": "You are an expert relevance grader. Please provide your assessment in valid JSON format."},
+                {"role": "system", "content": "You are an expert relevance grader."},
                 {"role": "user", "content": prompt}
             ]
             
             response = self._model.invoke(messages)
-            response_text = response.content if hasattr(response, 'content') else str(response)
             
-            # Parse response
-            parsed_results = self._parse_llm_response(response_text)
-            
-            # Map to GradeResult objects
+            # Map to GradeResult objects directly from structured output
             grade_results = []
             chunk_map = {chunk.id: chunk for chunk in chunks}
             
-            for result in parsed_results:
-                chunk_id = result.get('chunk_id')
-                chunk = chunk_map.get(chunk_id)
+            for result in response.results:
+                chunk = chunk_map.get(result.chunk_id)
                 
                 if chunk:
-                    relevance_score = float(result.get('relevance_score', 0.0))
-                    is_relevant = bool(result.get('is_relevant', False))
-                    reasoning = str(result.get('reasoning', ''))
-                    source_type = result.get('source_type', 'unknown')
-                    
                     grade_results.append(GradeResult(
-                        chunk_id=chunk_id,
-                        relevance_score=relevance_score,
-                        is_relevant=is_relevant,
-                        reasoning=reasoning,
-                        source_type=source_type
+                        chunk_id=result.chunk_id,
+                        relevance_score=result.relevance_score,
+                        is_relevant=result.is_relevant,
+                        reasoning=result.reasoning,
+                        source_type=result.source_type
                     ))
             
             # Ensure we have results for all chunks
