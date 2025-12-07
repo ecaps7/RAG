@@ -6,17 +6,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Literal, Optional
 
-
-class Intent(str, Enum):
-    """User intent classification categories."""
-    data_lookup = "data_lookup"
-    definition_lookup = "definition_lookup"
-    reasoning = "reasoning"
-    external_context = "external_context"
-    forecast = "forecast"
-    meta_query = "meta_query"
-
-
 SourceType = Literal["local", "web"]
 
 
@@ -33,13 +22,6 @@ class ContextChunk:
     reliability: float = 0.5
     metadata: Dict[str, str] = field(default_factory=dict)
     citation: Optional[str] = None
-
-
-@dataclass
-class RetrievalPlan:
-    """Plan for retrieval based on intent classification."""
-    local_top_k: int = 5
-    hybrid_strategy: Literal["merge", "interleave", "balance"] = "balance"
 
 
 @dataclass

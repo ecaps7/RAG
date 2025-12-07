@@ -45,7 +45,7 @@ class AppConfig:
     rebuild_vector_store: bool = os.getenv("REBUILD_VECTOR_STORE", "false").lower() == "true"
     
     # Ollama embedding model (run locally via Ollama)
-    ollama_embed_model: str = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:0.6b")
+    ollama_embed_model: str = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:4b")
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     
     # Legacy HuggingFace model config (kept for backward compatibility)

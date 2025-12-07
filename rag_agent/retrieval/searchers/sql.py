@@ -10,6 +10,7 @@ import sqlite3
 from typing import Any, Dict, List, Optional
 
 from ..config import SQL_DB_PATH
+from rag_agent.config import get_config, init_model_with_config
 from ..types import SQLResult
 from ...utils.logging import get_logger
 
@@ -130,14 +131,23 @@ class SQLRouter:
     def __init__(self, db_path: str = SQL_DB_PATH):
         self.db_path = db_path
         self.logger = get_logger("SQLRouter")
+        try:
+            cfg = get_config()
+            self._model = init_model_with_config(
+                cfg.response_model_name,
+                cfg.response_model_temperature
+            )
+        except Exception as e:
+            self.logger.warning("SQLRouter LLM init failed; will use fallback. (%s)", e)
+            self._model = None
 
     def should_route_to_sql(self, query: str) -> bool:
         """
         判断查询是否应该路由到 SQL
 
         条件:
-        1. 包含数值查询模式
-        2. 包含财务指标关键词
+        1. 包含数值查询模式 或者
+        2. 包含财务指标关键词并且包含排序、分组、聚合等操作意图
         """
         query = query.lower()
 
@@ -148,8 +158,11 @@ class SQLRouter:
 
         # 检查是否包含财务指标
         has_metric = self._extract_metrics(query) != []
+        
+        # 检查是否包含排序、分组、聚合等操作意图
+        has_complex_intent = any(keyword in query for keyword in ['排序', '分组', '总和', '平均', '最大值', '最小值', '降序', '升序'])
 
-        return has_numeric_intent and has_metric
+        return has_numeric_intent and has_metric or (has_metric and has_complex_intent)
 
     def _extract_metrics(self, query: str) -> List[str]:
         """从查询中提取财务指标名称"""
@@ -185,9 +198,92 @@ class SQLRouter:
 
         return None
 
+    def _generate_sql_from_query(self, query: str) -> str:
+        """
+        使用 LLM 从自然语言查询生成 SQL 语句
+
+        Args:
+            query: 用户自然语言查询
+
+        Returns:
+            生成的 SQL 语句
+        """
+        if not self._model:
+            self.logger.warning("LLM 模型未初始化，使用默认 SQL 模板")
+            # 回退到原始的参数提取方式，但使用更安全的默认SQL
+            return "SELECT metric_name, metric_value, unit, stock_code, company_name, report_period, source_table_id FROM financial_metrics LIMIT 10"
+
+        # 表结构信息
+        table_schema = """
+            CREATE TABLE financial_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT,           -- 股票代码，如 "600036"
+                company_name TEXT,         -- 公司名称，如 "招商银行"
+                report_period TEXT,        -- 报告期，格式如 "2023-Q3", "2023-H1", "2023-FY"
+                metric_name TEXT,          -- 财务指标名称，如 "营业收入", "净利润", "ROE"
+                metric_value REAL,         -- 财务指标数值，如 10000000000.0
+                unit TEXT,                 -- 单位，如 "元", "%"
+                source_table_id TEXT       -- 源表ID
+            )
+        """
+
+        # 示例数据
+        sample_data = """
+            示例数据：
+            1,600036,招商银行,2023-Q3,营业收入,311450000000.0,元,table_1
+            2,600036,招商银行,2023-Q3,净利润,108530000000.0,元,table_1
+            3,600036,招商银行,2023-Q3,ROE,16.56,% ,table_1
+            4,601398,工商银行,2023-Q3,营业收入,712120000000.0,元,table_2
+            5,601398,工商银行,2023-Q3,净利润,265000000000.0,元,table_2
+        """
+
+        # Text-to-SQL 提示词
+        prompt = f"""
+        请根据以下信息将用户的自然语言查询转换为准确的 SQL 语句：
+
+        1. 数据库表结构：
+        {table_schema}
+
+        2. 示例数据：
+        {sample_data}
+
+        3. 注意事项：
+        - 只返回 SQL 语句，不要包含其他解释或说明
+        - 使用正确的表名 financial_metrics
+        - 针对中文查询，确保理解用户意图
+        - 支持复杂查询，如 ORDER BY, SUM(), GROUP BY 等
+        - 注意数据类型，metric_value 是数值类型
+        - 股票代码、公司名称和财务指标名称都可以使用模糊匹配
+        - 财务指标名称可能包含详细描述（如"年化加权平均净资产收益率"、"归属于母公司股东的净利润"）
+        - 请使用 LIKE '%指标关键词%' 来查询财务指标，确保能匹配到相关的所有指标变体
+        - 对于英文缩写指标（如ROE、ROA、EPS），请同时匹配缩写和对应的中文名称（如"净资产收益率"、"总资产收益率"、"每股收益"）
+        - 只根据用户查询中明确提到的条件生成SQL，不要添加用户未提及的额外过滤条件（如时间范围、单位等）
+        - 如果用户没有指定特定的报告期，请不要添加时间过滤条件
+        - 如果用户没有指定特定的单位，请不要添加单位过滤条件
+
+        4. 用户查询：
+        {query}
+        """
+
+        try:
+            messages = [
+                {"role": "system", "content": "你是一个专业的 SQL 生成器，能够根据用户的自然语言查询和数据库表结构生成准确的 SQL 语句。"},
+                {"role": "user", "content": prompt}
+            ]
+            response = self._model.invoke(messages)
+            sql = response.content.strip()
+            
+            # 清理 SQL 语句，去除可能的标记
+            sql = re.sub(r"^```sql|```$", "", sql).strip()
+            self.logger.debug(f"生成的 SQL: {sql}")
+            return sql
+        except Exception as e:
+            self.logger.error(f"SQL 生成失败: {e}")
+            return ""
+
     def execute_query(self, query: str) -> List[SQLResult]:
         """
-        执行 SQL 查询（支持 TRIM 和模糊匹配）
+        执行 SQL 查询（使用 Text-to-SQL）
 
         Args:
             query: 用户自然语言查询
@@ -199,84 +295,49 @@ class SQLRouter:
             self.logger.warning(f"SQL 数据库不存在: {self.db_path}")
             return []
 
-        metrics = self._extract_metrics(query)
-        period = self._extract_period(query)
-        company = self._extract_company(query)
-
-        if not metrics:
-            return []
-
         try:
+            # 生成 SQL 语句
+            sql = self._generate_sql_from_query(query)
+            if not sql:
+                return []
+
             conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row  # 使用字典形式的结果
             cursor = conn.cursor()
 
+            # 执行 SQL
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+
             results = []
+            for row in rows:
+                # 使用字典转换来安全访问字段
+                row_dict = dict(row)
+                
+                # 处理聚合查询的情况
+                metric_value = 0.0
+                if "metric_value" in row_dict:
+                    metric_value = row_dict.get("metric_value", 0.0)
+                else:
+                    # 检查常见的聚合字段名（包含大小写变体）
+                    aggregate_fields = ["total_net_profit", "sum_metric_value", "sum(metric_value)", "SUM(metric_value)", "total", "sum"]
+                    for field in aggregate_fields:
+                        if field in row_dict:
+                            metric_value = row_dict.get(field, 0.0)
+                            break
+                
+                result = SQLResult(
+                    metric_name=row_dict.get("metric_name", "").strip() if row_dict.get("metric_name") else "",
+                    metric_value=metric_value,
+                    unit=row_dict.get("unit", "").strip() if row_dict.get("unit") else "",
+                    stock_code=row_dict.get("stock_code", "").strip() if row_dict.get("stock_code") else "",
+                    company_name=row_dict.get("company_name", "").strip() if row_dict.get("company_name") else "",
+                    report_period=row_dict.get("report_period", "").strip() if row_dict.get("report_period") else "",
+                    source_table_id=row_dict.get("source_table_id", "").strip() if row_dict.get("source_table_id") else "",
+                )
+                results.append(result)
 
-            for metric in metrics:
-                # 首先尝试精确匹配（使用 TRIM 去除空格）
-                sql = """
-                    SELECT metric_name, metric_value, unit, stock_code, company_name, report_period, source_table_id 
-                    FROM financial_metrics 
-                    WHERE TRIM(metric_name) = TRIM(?)
-                """
-                params: List[Any] = [metric]
-
-                if period:
-                    sql += " AND TRIM(report_period) = TRIM(?)"
-                    params.append(period)
-
-                if company:
-                    # 股票代码支持模糊匹配（可能带有前缀或后缀）
-                    sql += " AND (TRIM(stock_code) = TRIM(?) OR stock_code LIKE ?)"
-                    params.append(company)
-                    params.append(f"%{company}%")
-
-                cursor.execute(sql, params)
-                rows = cursor.fetchall()
-
-                # 如果精确匹配没有结果，尝试模糊匹配
-                if not rows:
-                    sql_fuzzy = """
-                        SELECT metric_name, metric_value, unit, stock_code, company_name, report_period, source_table_id 
-                        FROM financial_metrics 
-                        WHERE metric_name LIKE ?
-                    """
-                    params_fuzzy: List[Any] = [f"%{metric}%"]
-
-                    if period:
-                        # 报告期也支持模糊匹配
-                        period_pattern = period.replace("-", "").replace("_", "")
-                        sql_fuzzy += " AND (REPLACE(REPLACE(report_period, '-', ''), '_', '') LIKE ? OR report_period LIKE ?)"
-                        params_fuzzy.append(f"%{period_pattern}%")
-                        params_fuzzy.append(f"%{period}%")
-
-                    if company:
-                        sql_fuzzy += " AND (stock_code LIKE ? OR company_name LIKE ?)"
-                        params_fuzzy.append(f"%{company}%")
-                        params_fuzzy.append(f"%{company}%")
-
-                    cursor.execute(sql_fuzzy, params_fuzzy)
-                    rows = cursor.fetchall()
-
-                    if rows:
-                        self.logger.info(
-                            f"模糊匹配找到 {len(rows)} 条结果 (指标: {metric})"
-                        )
-
-                for row in rows:
-                    results.append(
-                        SQLResult(
-                            metric_name=row[0].strip() if row[0] else row[0],
-                            metric_value=row[1],
-                            unit=row[2].strip() if row[2] else row[2],
-                            stock_code=row[3].strip() if row[3] else row[3],
-                            company_name=row[4].strip() if row[4] else row[4],
-                            report_period=row[5].strip() if row[5] else row[5],
-                            source_table_id=row[6],
-                        )
-                    )
-
-            # 去重（同一指标可能被多次匹配）
+            # 去重
             seen = set()
             unique_results = []
             for r in results:
@@ -286,11 +347,11 @@ class SQLRouter:
                     unique_results.append(r)
 
             conn.close()
-            self.logger.info(f"SQL 查询返回 {len(unique_results)} 条结果（去重后）")
+            self.logger.debug(f"SQL 查询返回 {len(unique_results)} 条结果（去重后）")
             return unique_results
 
         except Exception as e:
-            self.logger.error(f"SQL 查询失败: {e}")
+            self.logger.error(f"SQL 查询执行失败: {e}")
             return []
 
     def format_results_as_context(self, results: List[SQLResult]) -> str:

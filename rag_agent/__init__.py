@@ -1,7 +1,6 @@
 """RAG Agent - A modular Retrieval-Augmented Generation system.
 
 This package provides:
-- Intent-based query routing
 - Hybrid retrieval (BM25 + Vector search)
 - Multi-source fusion with MMR diversity
 - LLM-powered answer generation with citations
@@ -20,10 +19,8 @@ warnings.filterwarnings("ignore", category=UserWarning, module="jieba")
 
 from .agent import RagAgent
 from .core.types import (
-    Intent,
     SourceType,
     ContextChunk,
-    RetrievalPlan,
     Answer,
 )
 from .core.exceptions import (
@@ -40,10 +37,8 @@ __all__ = [
     # Main agent
     "RagAgent",
     # Types
-    "Intent",
     "SourceType",
     "ContextChunk",
-    "RetrievalPlan",
     "Answer",
     # Exceptions
     "RagAgentError",

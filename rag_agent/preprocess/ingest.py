@@ -20,8 +20,8 @@ MILVUS_DB_PATH = "database/financial_vectors.db"
 BM25_INDEX_PATH = "database/bm25_index.pkl"
 
 # Embedding 配置
-OLLAMA_MODEL = "qwen3-embedding:8b"
-EMBEDDING_DIM = 4096  # Qwen3-Embedding 8B 的标准维度
+OLLAMA_MODEL = "qwen3-embedding:4b"
+EMBEDDING_DIM = 2560  # Qwen3-Embedding 4B 的标准维度
 
 # LLM 配置（用于结构化指标提取）- OpenAI-compatible API
 LLM_API_BASE = os.getenv("LLM_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
@@ -29,8 +29,8 @@ LLM_API_KEY = os.getenv("LLM_API_KEY", os.getenv("DASHSCOPE_API_KEY", ""))
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v3.2")
 
 # 输入数据文件
-FILE_TABLE = 'outputs/CMB-2025-q1/CMB-2025-q1-table.json'
-FILE_TEXT = 'outputs/CMB-2025-q1/CMB-2025-q1-text.json'
+FILE_TABLE = 'outputs/CITIC-2025-q1/CITIC-2025-q1-table.json'
+FILE_TEXT = 'outputs/CITIC-2025-q1/CITIC-2025-q1-text.json'
 
 # 需要提取结构化指标的表格类型（基于 section_path 关键词匹配）
 # 设为 None 表示处理所有表格，让 LLM 自行判断

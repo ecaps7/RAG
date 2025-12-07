@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import re
 import time
 from typing import Optional, Iterator, List, Tuple
 
-from .core.types import Answer, Intent, ContextChunk, CitationInfo
+from .core.types import Answer, ContextChunk, CitationInfo
 from .generation import AnswerGenerator
-from .intent import IntentClassifier, RetrievalRouter
+from .grade import LLMBasedGrader
 from .retrieval import LocalRetriever
 from .utils.logging import get_logger
-from .utils.debug import get_debug_printer
 from .utils.tracing import trace_pipeline, trace_pipeline_stream
 
 
@@ -19,26 +17,22 @@ class RagAgent:
     """Main RAG Agent that orchestrates the retrieval and generation pipeline.
     
     Flow:
-    1. Classify intent of the question
-    2. Route to appropriate retriever based on intent
-    3. Retrieve and rank results (hybrid search)
-    4. Generate answer with citations
+    1. Hybrid Retrieval (Vector + BM25 + SQL with RRF fusion)
+    2. Relevance Grading
+    3. Generate answer with citations
     """
     
     def __init__(
         self,
-        intent_classifier: Optional[IntentClassifier] = None,
-        router: Optional[RetrievalRouter] = None,
         retriever: Optional[LocalRetriever] = None,
         generator: Optional[AnswerGenerator] = None,
+        grader: Optional[LLMBasedGrader] = None,
         trace_id: Optional[str] = None,
     ):
         self.logger = get_logger(self.__class__.__name__, trace_id)
-        self.intent_classifier = intent_classifier or IntentClassifier(trace_id)
-        self.router = router or RetrievalRouter()
         self.retriever = retriever or LocalRetriever(trace_id=trace_id)
         self.generator = generator or AnswerGenerator()
-        self._debug = get_debug_printer()
+        self.grader = grader or LLMBasedGrader(trace_id=trace_id)
 
     @trace_pipeline("rag_pipeline")
     def run(self, question: str) -> Answer:
@@ -50,40 +44,31 @@ class RagAgent:
         Returns:
             Answer object with text, citations, confidence, and metadata
         """
-        # Debug: Print input question
-        self._debug.print_question(question)
+        self.logger.debug(f"Processing question: {question}")
         
-        # Step 1: Intent Classification (for future use)
-        t0 = time.perf_counter()
-        intent, intent_conf = self.intent_classifier.classify(question)
-        t1 = time.perf_counter()
-        self._debug.print_intent(intent, intent_conf, duration_ms=(t1 - t0) * 1000)
-        
-        # # Step 2: Retrieval Routing
-        # plan = self.router.plan(intent, question)
-        # self._debug.print_routing(plan, intent)
-
-        # Step 3: Hybrid Retrieval (Vector + BM25 + SQL with RRF fusion)
+        # Step 1: Hybrid Retrieval (Vector + BM25 + SQL with RRF fusion)
         t0 = time.perf_counter()
         chunks = self.retriever.retrieve(question, 8)
         t1 = time.perf_counter()
-        # self._debug.print_local_retrieval(chunks, question, duration_ms=(t1 - t0) * 1000)
+        self.logger.debug(f"Retrieved {len(chunks)} chunks in {t1 - t0:.2f} seconds")
         
-        # Step 4: Generation
+        # Step 2: Relevance Grading (RAG 3.0 improvement)
         t0 = time.perf_counter()
-        answer = self.generator.generate(question, chunks)
+        relevant_chunks = self.grader.filter_relevant(question, chunks)
+        t1 = time.perf_counter()
+        self.logger.info(f"Grading completed: {len(relevant_chunks)} relevant chunks out of {len(chunks)} total in {t1 - t0:.2f} seconds")
+        
+        # Step 3: Generation
+        t0 = time.perf_counter()
+        answer = self.generator.generate(question, relevant_chunks)
         t1 = time.perf_counter()
         
         answer.meta.update({
-            "intent": intent.value,
-            "intent_confidence": f"{intent_conf:.2f}",
             "chunks_retrieved": str(len(chunks)),
+            "chunks_filtered": str(len(relevant_chunks)),
         })
         
-        # Debug: Print generation result and summary
-        self._debug.print_generation(answer, len(chunks), duration_ms=(t1 - t0) * 1000)
-        self._debug.print_summary(answer, answer.meta)
-        
+        self.logger.debug(f"Generated answer with confidence {answer.confidence:.2f} in {t1 - t0:.2f} seconds")
         return answer
 
     @trace_pipeline_stream("rag_pipeline_stream")
@@ -98,31 +83,26 @@ class RagAgent:
             The citation_info_list contains numbered references that can be filtered
             based on which [n] markers appear in the generated text.
         """
-        # Debug: Print input question
-        self._debug.print_question(question)
+        self.logger.debug(f"Processing streaming question: {question}")
         
-        # Step 1: Intent Classification
+        # Step 1: Hybrid Retrieval
         t0 = time.perf_counter()
-        intent, intent_conf = self.intent_classifier.classify(question)
+        chunks = self.retriever.retrieve(question, 8)
         t1 = time.perf_counter()
-        self._debug.print_intent(intent, intent_conf, duration_ms=(t1 - t0) * 1000)
+        self.logger.debug(f"Retrieved {len(chunks)} chunks in {t1 - t0:.2f} seconds")
         
-        # Step 2: Retrieval Routing
-        plan = self.router.plan(intent, question)
-        self._debug.print_routing(plan, intent)
-
-        # Step 3: Hybrid Retrieval
+        # Step 2: Relevance Grading (RAG 3.0 improvement)
         t0 = time.perf_counter()
-        chunks = self.retriever.retrieve(question, plan.local_top_k, intent=intent)
+        relevant_chunks = self.grader.filter_relevant(question, chunks)
         t1 = time.perf_counter()
-        self._debug.print_local_retrieval(chunks, question, duration_ms=(t1 - t0) * 1000)
+        self.logger.info(f"Grading completed: {len(relevant_chunks)} relevant chunks out of {len(chunks)} total in {t1 - t0:.2f} seconds")
         
-        # Step 4: Stream generation
-        stream = self.generator.stream_answer_text(question, chunks)
+        # Step 3: Stream generation
+        stream = self.generator.stream_answer_text(question, relevant_chunks)
 
         # Build citation info with numbered references
         citation_infos: List[CitationInfo] = []
-        for idx, ch in enumerate(chunks, start=1):
+        for idx, ch in enumerate(relevant_chunks, start=1):
             title = ch.citation or ch.title or ch.source_id or ""
             # 从 metadata 中提取 page 和 doctype
             metadata = ch.metadata or {}

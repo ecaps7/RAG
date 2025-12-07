@@ -45,7 +45,7 @@ class BM25Searcher(BaseSearcher):
             with open(self.index_path, "rb") as f:
                 self.bm25, self.doc_map = pickle.load(f)
             self._loaded = True
-            self.logger.info(f"BM25 索引加载完成，共 {len(self.doc_map)} 条文档")
+            self.logger.debug(f"BM25 索引加载完成，共 {len(self.doc_map)} 条文档")
             return True
         except Exception as e:
             self.logger.error(f"BM25 索引加载失败: {e}")
@@ -99,7 +99,7 @@ class BM25Searcher(BaseSearcher):
                     )
                 )
 
-            self.logger.info(f"BM25 搜索返回 {len(search_results)} 条结果")
+            self.logger.debug(f"BM25 搜索返回 {len(search_results)} 条结果")
             return search_results
 
         except Exception as e:

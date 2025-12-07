@@ -120,7 +120,7 @@ class VectorSearcher(BaseSearcher):
                         )
                     )
 
-            self.logger.info(f"向量搜索返回 {len(search_results)} 条结果")
+            self.logger.debug(f"向量搜索返回 {len(search_results)} 条结果")
             return search_results
 
         except Exception as e:

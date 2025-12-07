@@ -13,6 +13,11 @@ warnings.filterwarnings("ignore")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
 
+from .utils.logging import get_logger
+
+# Get logger for CLI
+logger = get_logger("RAG_CLI")
+
 # Suppress external library warnings before importing pipeline
 try:
     warnings.filterwarnings("ignore", category=UserWarning, module="jieba._compat")
@@ -40,8 +45,8 @@ except Exception:
 from typing import List, Set
 import re as regex_module
 from .agent import RagAgent
-from .memory import rewrite_question
-from .utils.debug import set_debug_mode, is_debug_enabled
+# from .memory import rewrite_question
+from .utils.logging import set_logging_debug_mode, is_logging_debug_mode
 from .core.types import CitationInfo
 
 
@@ -123,10 +128,10 @@ def warmup_models():
     """
     import time
     
-    debug = is_debug_enabled()
+    debug = is_logging_debug_mode()
     
     if debug:
-        print("\n🔥 预热模型中...")
+        logger.info("预热模型中...")
     
     start_total = time.time()
     
@@ -134,36 +139,36 @@ def warmup_models():
     try:
         from .retrieval import get_retriever
         if debug:
-            print("  ⏳ 加载 LocalRetriever (Milvus + BM25 + SQL)...")
+            logger.debug("加载 LocalRetriever (Milvus + BM25 + SQL)...")
         t0 = time.time()
         retriever = get_retriever()
         # 触发内部组件初始化
         retriever.vector_searcher._ensure_client()
         retriever.bm25_searcher._ensure_loaded()
         if debug:
-            print(f"  ✅ LocalRetriever 就绪 (took {time.time() - t0:.2f}s)")
+            logger.debug(f"LocalRetriever 就绪 (took {time.time() - t0:.2f}s)")
     except Exception as e:
         if debug:
-            print(f"  ⚠️ LocalRetriever 加载失败: {e}")
+            logger.warning(f"LocalRetriever 加载失败: {e}")
     
     # 预热 Reranker 模型（HuggingFace Qwen3-Reranker）
     try:
         from .retrieval.rankers import SemanticReranker
         if debug:
-            print("  ⏳ 加载 Reranker 模型 (Qwen3-Reranker-4B)...")
+            logger.debug("加载 Reranker 模型 (Qwen3-Reranker-0.6B)...")
         t0 = time.time()
         reranker = SemanticReranker()
         # 触发模型加载
         reranker._load_model()
         if debug:
-            print(f"  ✅ Reranker 模型就绪 (took {time.time() - t0:.2f}s)")
+            logger.debug(f"Reranker 模型就绪 (took {time.time() - t0:.2f}s)")
     except Exception as e:
         if debug:
-            print(f"  ⚠️ Reranker 模型加载失败: {e}")
+            logger.warning(f"Reranker 模型加载失败: {e}")
     
     total_time = time.time() - start_total
     if debug:
-        print(f"🚀 预热完成，总耗时 {total_time:.2f}s\n")
+        logger.info(f"预热完成，总耗时 {total_time:.2f}s")
 
 
 def main():
@@ -186,7 +191,7 @@ def main():
 
     # 启用调试模式
     if args.debug:
-        set_debug_mode(True)
+        set_logging_debug_mode(True)
 
     agent = RagAgent(trace_id=args.trace_id)
 
@@ -198,7 +203,7 @@ def main():
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
         if not os.path.exists(in_path):
-            print(f"[ERROR] 输入文件不存在：{in_path}")
+            logger.error(f"输入文件不存在：{in_path}")
             return
 
         mode = "a" if args.append and os.path.exists(out_path) else "w"
@@ -250,7 +255,7 @@ def main():
                             row = {"question": q, "error": str(e)}
                             fout.write(json.dumps(row, ensure_ascii=False) + "\n")
                             err += 1
-        print(f"[DONE] 处理完成，共 {total} 条；成功 {ok}，失败 {err}。输出文件：{out_path}")
+        logger.info(f"处理完成，共 {total} 条；成功 {ok}，失败 {err}。输出文件：{out_path}")
         return
 
     # 单次运行（流式输出最终答案）

@@ -9,9 +9,8 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
-from ..core.types import ContextChunk, Intent
+from ..core.types import ContextChunk
 from ..utils.logging import get_logger
-from ..utils.debug import get_debug_printer, log_retrieval_step
 
 from .config import SQL_DB_PATH, MILVUS_DB_PATH, BM25_INDEX_PATH
 from .types import SearchResult
@@ -41,7 +40,6 @@ class LocalRetriever:
         self.vector_searcher = VectorSearcher(milvus_db_path)
         self.bm25_searcher = BM25Searcher(bm25_index_path)
         self.logger = get_logger("LocalRetriever", trace_id)
-        self.debug_printer = get_debug_printer()
         self._last_sql_context: Optional[str] = None
 
         # RRF 权重配置
@@ -61,7 +59,6 @@ class LocalRetriever:
         self,
         question: str,
         top_k: int = 10,
-        intent: Optional[Intent] = None,
         use_sql: bool = True,
         use_vector: bool = True,
         use_bm25: bool = True,
@@ -72,7 +69,6 @@ class LocalRetriever:
         Args:
             question: 用户查询
             top_k: 返回结果数量
-            intent: 用户意图（可选）
             use_sql: 是否启用 SQL 路由
             use_vector: 是否启用向量搜索
             use_bm25: 是否启用 BM25 搜索
@@ -84,17 +80,9 @@ class LocalRetriever:
         weights: List[float] = []
         sql_context: Optional[str] = None
 
-        # 根据意图调整权重
-        if intent == Intent.data_lookup:
-            self.rrf_weights = {"vector": 0.4, "bm25": 0.3, "sql": 0.3}
-        elif intent == Intent.definition_lookup:
-            self.rrf_weights = {"vector": 0.5, "bm25": 0.4, "sql": 0.1}
-        elif intent == Intent.reasoning:
-            self.rrf_weights = {"vector": 0.6, "bm25": 0.3, "sql": 0.1}
-
         # 1. SQL 路由查询（结构化数据）
         if use_sql and self.sql_router.should_route_to_sql(question):
-            self.logger.info("查询路由到 SQL...")
+            self.logger.debug("Routing query to SQL...")
             sql_results = self.sql_router.execute_query(question)
             if sql_results:
                 sql_context = self.sql_router.format_results_as_context(sql_results)
@@ -121,25 +109,25 @@ class LocalRetriever:
                 if sql_search_results:
                     result_lists.append(sql_search_results)
                     weights.append(self.rrf_weights["sql"])
-                    log_retrieval_step("SQL Search", sql_search_results, question)
+                    self.logger.debug(f"SQL search returned {len(sql_search_results)} results")
 
         # 2. 向量搜索
         if use_vector:
-            self.logger.info("执行向量搜索...")
+            self.logger.debug("Performing vector search...")
             vector_results = self.vector_searcher.search(question, top_k=top_k * 2)
             if vector_results:
                 result_lists.append(vector_results)
                 weights.append(self.rrf_weights["vector"])
-                log_retrieval_step("Vector Search", vector_results, question)
+                self.logger.debug(f"Vector search returned {len(vector_results)} results")
 
         # 3. BM25 关键词搜索
         if use_bm25:
-            self.logger.info("执行 BM25 搜索...")
+            self.logger.debug("Performing BM25 search...")
             bm25_results = self.bm25_searcher.search(question, top_k=top_k * 2)
             if bm25_results:
                 result_lists.append(bm25_results)
                 weights.append(self.rrf_weights["bm25"])
-                log_retrieval_step("BM25 Search", bm25_results, question)
+                self.logger.debug(f"BM25 search returned {len(bm25_results)} results")
 
         # 4. RRF 融合（仅融合非 SQL 结果）
         # SQL 结果单独保存，不参与 RRF 和重排序
@@ -155,11 +143,11 @@ class LocalRetriever:
                 non_sql_weights.append(weights[i])
 
         if non_sql_result_lists:
-            self.logger.info(f"RRF 融合 {len(non_sql_result_lists)} 路召回结果...")
+            self.logger.debug(f"Performing RRF fusion on {len(non_sql_result_lists)} result lists...")
             fused_results = reciprocal_rank_fusion(
                 non_sql_result_lists, k=RRF_K, weights=non_sql_weights
             )
-            log_retrieval_step("RRF Fusion", fused_results, question)
+            self.logger.debug(f"RRF fusion returned {len(fused_results)} results")
             # 粗排后取更多结果供重排序使用
             coarse_results = fused_results[: top_k * 3] if self.use_reranker else fused_results[:top_k]
         else:
@@ -167,9 +155,9 @@ class LocalRetriever:
 
         # 5. 可选：语义重排序（仅对非 SQL 结果）
         if self.use_reranker and self.reranker and coarse_results:
-            self.logger.info(f"执行语义重排序 (输入 {len(coarse_results)} 条)...")
+            self.logger.debug(f"Performing semantic reranking on {len(coarse_results)} results...")
             search_results = self.reranker.rerank(question, coarse_results, top_k=top_k)
-            log_retrieval_step("Semantic Reranking", search_results, question)
+            self.logger.debug(f"Semantic reranking returned {len(search_results)} results")
         else:
             search_results = coarse_results[:top_k]
 
@@ -195,7 +183,7 @@ class LocalRetriever:
             # SQL 结果放在最前面，不占用 top_k 名额
             chunks = [sql_chunk] + chunks
 
-        self.logger.info(f"LocalRetriever 返回 {len(chunks)} 条结果")
+        self.logger.info(f"LocalRetriever returned {len(chunks)} results")
         return chunks
 
     def _to_chunks(self, results: List[SearchResult]) -> List[ContextChunk]:
@@ -255,7 +243,6 @@ def get_retriever() -> LocalRetriever:
 def hybrid_search(
     query: str,
     top_k: int = 10,
-    intent: Optional[Intent] = None,
 ) -> List[ContextChunk]:
     """
     执行混合搜索的便捷函数
@@ -263,10 +250,9 @@ def hybrid_search(
     Args:
         query: 用户查询
         top_k: 返回结果数量
-        intent: 用户意图
 
     Returns:
         ContextChunk 列表
     """
     retriever = get_retriever()
-    return retriever.retrieve(query, top_k=top_k, intent=intent)
+    return retriever.retrieve(query, top_k=top_k)

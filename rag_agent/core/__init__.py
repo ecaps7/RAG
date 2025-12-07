@@ -1,14 +1,12 @@
 """Core types, interfaces, and exceptions for rag_agent."""
 
 from .types import (
-    Intent,
     SourceType,
     ContextChunk,
-    RetrievalPlan,
     Answer,
     CitationInfo,
 )
-from .interfaces import Retriever, IntentClassifierProtocol, Generator
+from .interfaces import Retriever, Generator
 from .exceptions import (
     RagAgentError,
     ConfigurationError,
@@ -19,16 +17,12 @@ from .exceptions import (
 
 __all__ = [
     # Types
-    "Intent",
     "SourceType",
     "ContextChunk",
-    "RetrievalPlan",
-    "FusionResult",
     "Answer",
     "CitationInfo",
     # Interfaces
     "Retriever",
-    "IntentClassifierProtocol",
     "Generator",
     # Exceptions
     "RagAgentError",

@@ -3,26 +3,35 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from typing import Optional
 
 
+# Default log level
+DEFAULT_LOG_LEVEL = logging.INFO
+
+# Log format
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+
 def set_logging_debug_mode(enabled: bool):
-    """Set whether debug mode is enabled for logging (no-op, kept for compatibility)."""
-    pass
+    """Set whether debug mode is enabled for logging."""
+    level = logging.DEBUG if enabled else DEFAULT_LOG_LEVEL
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    for handler in root_logger.handlers:
+        handler.setLevel(level)
 
 
 def is_logging_debug_mode() -> bool:
-    """Check if debug mode is enabled (always returns False, kept for compatibility)."""
-    return False
+    """Check if debug mode is enabled."""
+    root_logger = logging.getLogger()
+    return root_logger.level <= logging.DEBUG
 
 
 class TraceAdapter(logging.LoggerAdapter):
-    """Logger adapter that prepends trace ID to messages.
-    
-    INFO and DEBUG logs are silenced and replaced by colorful debug output.
-    WARNING and ERROR logs are always shown.
-    """
+    """Logger adapter that prepends trace ID to messages."""
     
     def __init__(self, logger: logging.Logger, trace_id: Optional[str]):
         super().__init__(logger, {"trace_id": trace_id})
@@ -31,22 +40,6 @@ class TraceAdapter(logging.LoggerAdapter):
         trace = self.extra.get("trace_id")
         prefix = f"[trace={trace}] " if trace else ""
         return prefix + str(msg), kwargs
-    
-    def info(self, msg, *args, **kwargs):
-        """INFO logs are silenced (replaced by colorful debug output)."""
-        pass
-    
-    def debug(self, msg, *args, **kwargs):
-        """DEBUG logs are silenced (replaced by colorful debug output)."""
-        pass
-    
-    def warning(self, msg, *args, **kwargs):
-        """Warnings are always shown."""
-        super().warning(msg, *args, **kwargs)
-    
-    def error(self, msg, *args, **kwargs):
-        """Errors are always shown."""
-        super().error(msg, *args, **kwargs)
 
 
 class ColorFormatter(logging.Formatter):
@@ -54,7 +47,7 @@ class ColorFormatter(logging.Formatter):
     
     COLORS = {
         logging.DEBUG: "\x1b[36m",    # Cyan
-        logging.INFO: "\x1b[90m",     # Gray (dimmed)
+        logging.INFO: "\x1b[32m",     # Green
         logging.WARNING: "\x1b[33m",  # Yellow
         logging.ERROR: "\x1b[31m",    # Red
         logging.CRITICAL: "\x1b[41m", # Red background
@@ -67,6 +60,32 @@ class ColorFormatter(logging.Formatter):
         return f"{color}{base}{reset}"
 
 
+def _setup_logging():
+    """Set up logging with environment-based configuration."""
+    # Configure root logger
+    root_logger = logging.getLogger()
+    
+    # Skip if already configured
+    if root_logger.handlers:
+        return
+    
+    # Get log level from environment
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, log_level, DEFAULT_LOG_LEVEL)
+    
+    # Create handler
+    handler = logging.StreamHandler(stream=sys.stderr)
+    
+    # Create formatter
+    formatter = ColorFormatter(LOG_FORMAT)
+    handler.setFormatter(formatter)
+    
+    # Configure root logger
+    root_logger.addHandler(handler)
+    root_logger.setLevel(level)
+    root_logger.propagate = False
+
+
 def get_logger(name: str, trace_id: Optional[str] = None) -> TraceAdapter:
     """Get a logger with optional trace ID support.
     
@@ -77,13 +96,11 @@ def get_logger(name: str, trace_id: Optional[str] = None) -> TraceAdapter:
     Returns:
         A LoggerAdapter with trace ID support
     """
+    # Ensure logging is set up
+    _setup_logging()
+    
+    # Get logger
     logger = logging.getLogger(name)
-    if not logger.handlers:
-        handler = logging.StreamHandler(stream=sys.stderr)
-        fmt = ColorFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-        handler.setFormatter(fmt)
-        logger.addHandler(handler)
-        logger.setLevel(logging.DEBUG)  # Allow all levels, filtering done in adapter
-        # Avoid propagating to root to keep format consistent
-        logger.propagate = False
+    logger.propagate = True
+    
     return TraceAdapter(logger, trace_id)
