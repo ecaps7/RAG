@@ -13,7 +13,7 @@ import jieba
 import numpy as np
 
 from .base import BaseSearcher
-from ..config import BM25_INDEX_PATH
+from rag_agent.config import get_config
 from ..types import SearchResult
 from ...utils.logging import get_logger
 
@@ -25,8 +25,9 @@ class BM25Searcher(BaseSearcher):
     使用预建的 BM25 索引进行关键词匹配搜索
     """
 
-    def __init__(self, index_path: str = BM25_INDEX_PATH):
-        self.index_path = index_path
+    def __init__(self, index_path: Optional[str] = None):
+        config = get_config()
+        self.index_path = index_path or config.bm25_index_path
         self.bm25 = None
         self.doc_map: List[Dict] = []
         self.logger = get_logger("BM25Searcher")

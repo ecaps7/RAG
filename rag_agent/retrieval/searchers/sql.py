@@ -9,7 +9,7 @@ import re
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from ..config import SQL_DB_PATH
+
 from rag_agent.config import get_config
 from rag_agent.llm import llm_services
 from ..types import SQLResult
@@ -129,8 +129,9 @@ class SQLRouter:
         "华夏": "600015",
     }
 
-    def __init__(self, db_path: str = SQL_DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        config = get_config()
+        self.db_path = db_path or config.sql_db_path
         self.logger = get_logger("SQLRouter")
         try:
             # Use unified LLM service

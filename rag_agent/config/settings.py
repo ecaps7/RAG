@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Dict
 
@@ -38,11 +39,20 @@ class AppConfig:
     ark_api_key: str | None = os.getenv("ARK_API_KEY")
     ark_base_url: str | None = os.getenv("ARK_BASE_URL")
 
+    # ===== Project Structure =====
+    project_root: Path = Path(__file__).resolve().parent.parent.parent
+    data_dir: Path = project_root / "database"
+
     # ===== Retrieval & Vector Store =====
     outputs_dir: str = os.getenv("OUTPUTS_DIR", "outputs")
     vector_store_path: str = os.getenv("VECTOR_STORE_PATH", "outputs/vector_store")
     all_chunks_path: str = os.getenv("ALL_CHUNKS_PATH", "outputs/all_chunks.jsonl")
     rebuild_vector_store: bool = os.getenv("REBUILD_VECTOR_STORE", "false").lower() == "true"
+
+    # ===== Database Paths =====
+    sql_db_path: str = os.getenv("SQL_DB_PATH", str(data_dir / "financial_rag.db"))
+    milvus_db_path: str = os.getenv("MILVUS_DB_PATH", str(data_dir / "financial_vectors.db"))
+    bm25_index_path: str = os.getenv("BM25_INDEX_PATH", str(data_dir / "bm25_index.pkl"))
     
     # Ollama embedding model (run locally via Ollama)
     ollama_embed_model: str = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:4b")
@@ -53,6 +63,10 @@ class AppConfig:
     
     # Embedding backend: "ollama" or "huggingface"
     embedding_backend: str = os.getenv("EMBEDDING_BACKEND", "ollama")
+    embedding_dim: int = int(os.getenv("EMBEDDING_DIM", "2560"))
+    
+    # Milvus settings
+    milvus_collection: str = os.getenv("MILVUS_COLLECTION", "financial_chunks")
     
     top_k_retrieval: int = int(os.getenv("TOP_K_RETRIEVAL", "8"))
     
@@ -60,41 +74,14 @@ class AppConfig:
     use_mmr: bool = os.getenv("USE_MMR", "true").lower() == "true"
     mmr_lambda_mult: float = float(os.getenv("MMR_LAMBDA_MULT", "0.3"))
     mmr_fetch_multiplier: float = float(os.getenv("MMR_FETCH_MULTIPLIER", "3.0"))
-    
-    # ===== BM25 Settings =====
-    bm25_index_path: str = os.getenv(
-        "BM25_INDEX_PATH",
-        os.path.join(os.getenv("OUTPUTS_DIR", "outputs"), "bm25_index.json")
-    )
-    bm25_k1: float = float(os.getenv("BM25_K1", "1.5"))
-    bm25_b: float = float(os.getenv("BM25_B", "0.75"))
 
-    # ===== LLM Query Expansion =====
-    use_llm_query_expansion: bool = os.getenv("USE_LLM_QUERY_EXPANSION", "true").lower() == "true"
-    ollama_chat_model: str = os.getenv("OLLAMA_CHAT_MODEL", "qwen3:1.7b")
-    query_expansion_count: int = int(os.getenv("QUERY_EXPANSION_COUNT", "3"))
+    # ===== Reranker Settings =====
+    reranker_model: str = os.getenv("RERANKER_MODEL", str(project_root / "model" / "Qwen3-Reranker-0.6B"))
+    reranker_threshold: float = float(os.getenv("RERANKER_THRESHOLD", "0.0"))  # Qwen3-Reranker outputs scores between 0-1
 
-    # ===== Chinese Stopwords =====
-    zh_stopwords: set[str] = field(default_factory=lambda: {
-        "的", "是", "在", "和", "与", "了", "等", "有", "为", "也", "我", "你", "他", "她",
-        "及", "并", "对", "于", "或", "被", "其", "与其", "其中",
-    })
     
-    # ===== Source Reliability =====
-    source_reliability: Dict[str, object] = field(default_factory=lambda: {
-        "local": SOURCE_RELIABILITY.get("local", 0.9),
-    })
-    
-    # ===== Top-K per Source =====
-    top_k_per_source: Dict[str, int] = field(default_factory=lambda: TOP_K.copy())
-
-    # ===== Fusion Layer Settings =====
-    fusion_use_normalization: bool = os.getenv("FUSION_USE_NORMALIZATION", "true").lower() == "true"
-    fusion_norm_method: str = os.getenv("FUSION_NORM_METHOD", "minmax")  # "minmax" | "zscore"
-    fusion_norm_eps: float = float(os.getenv("FUSION_NORM_EPS", "1e-8"))
-    fusion_use_mmr: bool = os.getenv("FUSION_USE_MMR", "true").lower() == "true"
-    fusion_mmr_alpha: float = float(os.getenv("FUSION_MMR_ALPHA", "0.35"))
-    fusion_mmr_fetch_multiplier: float = float(os.getenv("FUSION_MMR_FETCH_MULTIPLIER", "2.5"))
+    # ===== RRF Settings =====
+    rrf_k: int = int(os.getenv("RRF_K", "60"))  # RRF constant, usually set to 60
 
 
 # Singleton config instance

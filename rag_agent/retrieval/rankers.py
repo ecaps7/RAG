@@ -23,7 +23,7 @@ import transformers
 transformers.logging.set_verbosity_error()
 
 from .types import SearchResult
-from . import config
+from rag_agent.config import get_config
 from ..utils.logging import get_logger
 
 # 获取 logger
@@ -31,7 +31,8 @@ logger = get_logger("rankers")
 
 
 # RRF 融合参数
-RRF_K = config.RRF_K if hasattr(config, "RRF_K") else 60
+config = get_config()
+RRF_K = config.rrf_k
 
 
 # ================= RRF 融合 =================
@@ -120,11 +121,11 @@ class SemanticReranker:
 
     def __init__(
         self,
-        model_name: str = config.RERANKER_MODEL,
+        model_name: Optional[str] = None,
         device: Optional[str] = None,
         max_length: int = 8192,
     ):
-        self.model_name = model_name
+        self.model_name = model_name or config.reranker_model
         self.max_length = max_length
         self._model_available: Optional[bool] = None
         
@@ -280,7 +281,7 @@ class SemanticReranker:
         query: str,
         candidates: List[SearchResult],
         top_k: int = 10,
-        threshold: float = config.RERANKER_THRESHOLD,
+        threshold: Optional[float] = None,
         batch_size: int = 8,
     ) -> List[SearchResult]:
         """
@@ -307,6 +308,10 @@ class SemanticReranker:
         if not self._check_model_available():
             logger.warning("Reranker 不可用，返回原始排序")
             return candidates[:top_k]
+
+        # 使用配置的阈值如果未提供
+        if threshold is None:
+            threshold = config.reranker_threshold
 
         logger.info(f"使用 Qwen3-Reranker-4B 对 {len(candidates)} 条结果进行重排序...")
 

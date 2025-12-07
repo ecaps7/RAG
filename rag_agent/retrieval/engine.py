@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from ..core.types import ContextChunk
 from ..utils.logging import get_logger
 
-from .config import SQL_DB_PATH, MILVUS_DB_PATH, BM25_INDEX_PATH
+from rag_agent.config import get_config
 from .types import SearchResult
 from .rankers import reciprocal_rank_fusion, RRF_K, SemanticReranker
 from .searchers.vector import VectorSearcher
@@ -30,15 +30,16 @@ class LocalRetriever:
 
     def __init__(
         self,
-        sql_db_path: str = SQL_DB_PATH,
-        milvus_db_path: str = MILVUS_DB_PATH,
-        bm25_index_path: str = BM25_INDEX_PATH,
+        sql_db_path: Optional[str] = None,
+        milvus_db_path: Optional[str] = None,
+        bm25_index_path: Optional[str] = None,
         trace_id: Optional[str] = None,
         use_reranker: bool = True,
     ):
-        self.sql_router = SQLRouter(sql_db_path)
-        self.vector_searcher = VectorSearcher(milvus_db_path)
-        self.bm25_searcher = BM25Searcher(bm25_index_path)
+        config = get_config()
+        self.sql_router = SQLRouter(sql_db_path or config.sql_db_path)
+        self.vector_searcher = VectorSearcher(milvus_db_path or config.milvus_db_path)
+        self.bm25_searcher = BM25Searcher(bm25_index_path or config.bm25_index_path)
         self.logger = get_logger("LocalRetriever", trace_id)
         self._last_sql_context: Optional[str] = None
 

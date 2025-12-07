@@ -12,7 +12,7 @@ import ollama
 from pymilvus import MilvusClient
 
 from .base import BaseSearcher
-from ..config import MILVUS_DB_PATH, MILVUS_COLLECTION, OLLAMA_EMBED_MODEL, EMBEDDING_DIM
+from rag_agent.config import get_config
 from ..types import SearchResult
 from ...utils.logging import get_logger
 
@@ -26,11 +26,12 @@ class VectorSearcher(BaseSearcher):
 
     def __init__(
         self,
-        db_path: str = MILVUS_DB_PATH,
-        collection_name: str = MILVUS_COLLECTION,
+        db_path: Optional[str] = None,
+        collection_name: Optional[str] = None,
     ):
-        self.db_path = db_path
-        self.collection_name = collection_name
+        config = get_config()
+        self.db_path = db_path or config.milvus_db_path
+        self.collection_name = collection_name or config.milvus_collection
         self.client: Optional[MilvusClient] = None
         self.logger = get_logger("VectorSearcher")
 
@@ -55,24 +56,25 @@ class VectorSearcher(BaseSearcher):
 
     def _get_embedding(self, text: str) -> List[float]:
         """调用 Ollama 获取向量"""
+        config = get_config()
         try:
             text = text.replace("\n", " ").strip()
             if not text:
-                return [0.0] * EMBEDDING_DIM
+                return [0.0] * config.embedding_dim
 
-            response = ollama.embeddings(model=OLLAMA_EMBED_MODEL, prompt=text)
+            response = ollama.embeddings(model=config.ollama_embed_model, prompt=text)
             embedding = response.get("embedding", [])
 
-            if not embedding or len(embedding) != EMBEDDING_DIM:
+            if not embedding or len(embedding) != config.embedding_dim:
                 self.logger.warning(
-                    f"向量维度异常，预期: {EMBEDDING_DIM}, 实际: {len(embedding)}"
+                    f"向量维度异常，预期: {config.embedding_dim}, 实际: {len(embedding)}"
                 )
-                return [0.0] * EMBEDDING_DIM
+                return [0.0] * config.embedding_dim
 
             return embedding
         except Exception as e:
             self.logger.error(f"Embedding 调用失败: {e}")
-            return [0.0] * EMBEDDING_DIM
+            return [0.0] * config.embedding_dim
 
     def search(self, query: str, top_k: int = 10) -> List[SearchResult]:
         """

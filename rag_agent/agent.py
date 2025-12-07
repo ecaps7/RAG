@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Optional, Iterator, List, Tuple
 
-from .core.types import Answer, ContextChunk, CitationInfo
+from .core.types import Answer, CitationInfo
 from .generation import AnswerGenerator
 from .grade import LLMBasedGrader
 from .retrieval import LocalRetriever
