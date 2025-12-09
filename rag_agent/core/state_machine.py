@@ -18,7 +18,7 @@ from rag_agent.core.nodes import (
     final_output_node,
     reasoning_conditional,
     hallucination_conditional,
-    web_search_conditional
+    aggregation_conditional
 )
 
 # 构建状态机
@@ -47,7 +47,7 @@ graph.set_entry_point("query_rewrite")
 graph.add_edge("query_rewrite", "vector_retrieval")
 graph.add_edge("query_rewrite", "bm25_retrieval")
 
-# 2. 查询重写 -> SQL生成执行（串行）
+# 2. 查询重写 -> SQL生成执行（并行）
 graph.add_edge("query_rewrite", "sql_generation_execution")
 
 # 3. 向量检索和BM25检索结果 -> RRF融合
@@ -57,14 +57,21 @@ graph.add_edge("bm25_retrieval", "rrf_fusion")
 # 4. RRF融合 -> 重排
 graph.add_edge("rrf_fusion", "rerank")
 
-# 5. SQL生成执行 -> 重排（确保SQL结果在重排后可用）
-graph.add_edge("sql_generation_execution", "context_aggregation")
-
-# 6. 重排 -> 上下文聚合
+# 5. 重排 -> 上下文聚合
 graph.add_edge("rerank", "context_aggregation")
 
-# 5. 上下文聚合 -> 推理分析器
-graph.add_edge("context_aggregation", "reasoning_analyzer")
+# 6. SQL生成执行 -> 上下文聚合（与重排结果并行到达，等待所有输入完成）
+graph.add_edge("sql_generation_execution", "context_aggregation")
+
+# 5. 上下文聚合 -> 条件路由（检查是否同时存在SQL结果和重排结果）
+graph.add_conditional_edges(
+    "context_aggregation",
+    aggregation_conditional,
+    {
+        "reasoning_analyzer": "reasoning_analyzer",
+        "end": END
+    }
+)
 
 # 6. 推理分析器 -> 条件路由
 graph.add_conditional_edges(

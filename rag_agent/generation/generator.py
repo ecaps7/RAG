@@ -43,19 +43,29 @@ class AnswerGenerator:
     - Streaming support for real-time output
     - Template fallback when LLM is unavailable
     """
+    _instance: Optional["AnswerGenerator"] = None
+    _initialized: bool = False
+
+    def __new__(cls, trace_id: Optional[str] = None):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __init__(self, trace_id: Optional[str] = None):
-        self.logger = get_logger(self.__class__.__name__, trace_id)
-        try:
-            # Use unified LLM service
-            self._base_model = llm_services.get_model()
-            # Use structured model for non-streaming calls
-            self._structured_model = llm_services.get_structured_model(AnswerOutput)
-            self.logger.info("AnswerGenerator LLM initialized successfully.")
-        except Exception as e:
-            self.logger.info("AnswerGenerator LLM init failed; will use fallback. (%s)", e)
-            self._base_model = None
-            self._structured_model = None
+        if not AnswerGenerator._initialized:
+            self.logger = get_logger(self.__class__.__name__, trace_id)
+            try:
+                # Use unified LLM service
+                self._base_model = llm_services.get_model()
+                # Use structured model for non-streaming calls
+                self._structured_model = llm_services.get_structured_model(AnswerOutput)
+                self.logger.info("AnswerGenerator LLM initialized successfully.")
+                AnswerGenerator._initialized = True
+            except Exception as e:
+                self.logger.info("AnswerGenerator LLM init failed; will use fallback. (%s)", e)
+                self._base_model = None
+                self._structured_model = None
+                AnswerGenerator._initialized = True
 
     def _format_contexts(self, chunks: List[ContextChunk]) -> List[Dict[str, Any]]:
         """Format chunks as context list for LLM with numbered references."""

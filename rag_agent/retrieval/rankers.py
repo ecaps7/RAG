@@ -108,9 +108,9 @@ def reciprocal_rank_fusion(
 
 class SemanticReranker:
     """
-    基于 HuggingFace Qwen3-Reranker-4B 的语义重排序器
+    基于 HuggingFace Qwen3-Reranker-0.6B 的语义重排序器
 
-    使用 transformers 加载 Qwen/Qwen3-Reranker-4B 模型，
+    使用 transformers 加载 Qwen/Qwen3-Reranker-0.6B 模型，
     通过 "yes"/"no" 的 logprobs 计算相关性分数。
     """
 
@@ -313,7 +313,7 @@ class SemanticReranker:
         if threshold is None:
             threshold = config.reranker_threshold
 
-        logger.info(f"使用 Qwen3-Reranker-4B 对 {len(candidates)} 条结果进行重排序...")
+        logger.info(f"使用 Qwen3-Reranker-0.6B 对 {len(candidates)} 条结果进行重排序...")
 
         # 准备文档文本
         doc_texts = []

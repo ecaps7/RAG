@@ -7,7 +7,7 @@ from rag_agent.agent import RagAgent
 agent = RagAgent()
 
 # 测试问题
-question = "招商银行2025年第一季度的净利润是多少？"
+question = "中信银行2025年第一季度的净利润是多少？"
 
 print(f"测试问题: {question}")
 print("=" * 50)

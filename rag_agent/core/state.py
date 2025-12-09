@@ -27,7 +27,6 @@ class AgentState(TypedDict):
     # 多跳与迭代相关
     followup_queries: List[str]         # 生成的追问列表
     accumulated_context: List[ContextChunk] # 累积的上下文
-    reasoning_result: str               # 推理分析结果
     
     # 最终输出
     final_answer: Optional[Answer]      # 最终答案

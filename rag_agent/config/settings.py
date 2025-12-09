@@ -99,17 +99,21 @@ def get_config() -> AppConfig:
 def init_model_with_config(model_name: str, temperature: float | None = None):
     """Initialize a chat model based on environment configuration.
     
-    Supports Doubao/DeepSeek/Google providers.
+    Supports Doubao/DeepSeek/Google/Ollama providers.
     """
     cfg = get_config()
 
     api_key = None
     base_url = None
+    model_provider = None
 
     # Route to ARK for Doubao models
     if "doubao" in model_name.lower():
         api_key = cfg.ark_api_key
         base_url = cfg.ark_base_url
+    elif "ollama" in model_name.lower() or model_name in ["qwen3:14b", "qwen3-embedding:4b"]:
+        model_provider = "ollama"
+        base_url = cfg.ollama_base_url
     else:
         # Default to DeepSeek; fallback to Google
         api_key = cfg.deepseek_api_key or cfg.google_api_key
@@ -118,7 +122,14 @@ def init_model_with_config(model_name: str, temperature: float | None = None):
         "api_key": api_key,
         "temperature": temperature if temperature is not None else cfg.response_model_temperature,
     }
+    
+    # 针对 Ollama 模型添加特定参数
+    if model_provider == "ollama" and model_name == "qwen3:14b":
+        # 关闭 qwen3:14b 的思考模式
+        params["model_kwargs"] = {"reasoning": False, "keep_alive": False}
     if base_url:
         params["base_url"] = base_url
+    if model_provider:
+        params["model_provider"] = model_provider
 
     return init_chat_model(model_name, **params)
