@@ -59,16 +59,31 @@ class SQLRouter:
         
         try:
             prompt = f"""
-            请判断以下用户查询是否需要使用SQL数据库进行查询。
-            1. 如果查询涉及到具体的数值、财务指标、统计数据、比较分析等，应该使用SQL查询。
-            2. 如果查询是关于概念解释、定义、描述性内容等，不需要使用SQL查询。
-            3. 只需要返回'是'或'否'，不要添加任何其他解释。
-            
-            用户查询：{query}
+你是一位专业的查询路由分类专家，能够准确判断用户查询是否需要从结构化数据库中获取信息。
+
+【用户查询】
+{query}
+
+【判断标准】
+请根据以下标准判断是否需要使用SQL数据库查询：
+
+**需要SQL查询的情况**：
+- 涉及具体的数值、财务指标（如营业收入、净利润、ROE、ROA等）
+- 需要统计分析、数据汇总、排序比较
+- 查询特定时间段的量化数据
+- 需要同比、环比分析
+
+**不需要SQL查询的情况**：
+- 咨询概念解释、定义、原理等描述性内容
+- 询问业务流程、策略分析等定性信息
+- 寻求建议、观点或专业意见
+
+【输出要求】
+请只输出'是'或'否'，不要添加任何其他解释。
             """
             
             messages = [
-                {"role": "system", "content": "你是一个专业的查询分类器，能够准确判断用户查询是否需要使用SQL数据库。"},
+                {"role": "system", "content": "你是一位专业的查询路由分类专家。"},
                 {"role": "user", "content": prompt}
             ]
             
@@ -107,23 +122,29 @@ class SQLRouter:
 
         # 简化的 Text-to-SQL 提示词
         prompt = f"""
-        请将用户查询转换为 SQL 语句，仅返回 SQL，不要添加任何解释：
+你是一位专业的SQL生成专家，擅长将自然语言问题转化为精准的SQL查询语句。
 
-        表信息：
-        {table_info}
+【数据表结构】
+{table_info}
 
-        要求：
-        - 使用表名 financial_metrics
-        - 只根据用户明确提到的条件生成 SQL，不添加额外过滤条件
-        - 支持 ORDER BY, SUM(), AVG(), GROUP BY 等复杂查询
-        - 财务指标使用 LIKE 模糊匹配，支持中英文缩写（如 ROE 和 净资产收益率）
-        
-        用户查询：{query}
+【用户查询】
+{query}
+
+【SQL生成要求】
+请根据用户查询生成对应的SQL语句，遵循以下规则：
+
+1. **使用标准表名**：查询必须使用 `financial_metrics` 表
+2. **精准条件**：只根据用户明确提到的条件生成WHERE子句，不要自行添加额外过滤
+3. **支持复杂查询**：合理使用 ORDER BY, SUM(), AVG(), GROUP BY 等聚合和排序操作
+4. **模糊匹配**：财务指标名称使用 LIKE 进行模糊匹配，支持中英文缩写（如"ROE"和"净资产收益率"）
+5. **纯净输出**：只输出SQLSQL语句，不要添加任何解释或标记
+
+【SQL输出】
         """
 
         try:
             messages = [
-                {"role": "system", "content": "你是专业的 SQL 生成器，能根据用户查询准确生成 SQL 语句。"},
+                {"role": "system", "content": "你是一位专业的SQL生成专家。"},
                 {"role": "user", "content": prompt}
             ]
             response = self._model.invoke(messages)
@@ -154,7 +175,9 @@ class SQLRouter:
         try:
             # 生成 SQL 语句
             sql = self._generate_sql_from_query(query)
+            self.logger.info(f"生成的 SQL 语句: {sql}")
             if not sql:
+                self.logger.warning("SQL 生成失败，返回空结果")
                 return []
 
             conn = sqlite3.connect(self.db_path)
@@ -162,8 +185,10 @@ class SQLRouter:
             cursor = conn.cursor()
 
             # 执行 SQL
+            self.logger.info(f"开始执行 SQL 查询...")
             cursor.execute(sql)
             rows = cursor.fetchall()
+            self.logger.info(f"SQL 执行完成，返回 {len(rows)} 行数据")
 
             results = []
             for row in rows:
@@ -203,7 +228,9 @@ class SQLRouter:
                     unique_results.append(r)
 
             conn.close()
-            self.logger.debug(f"SQL 查询返回 {len(unique_results)} 条结果（去重后）")
+            self.logger.info(f"SQL 查询返回 {len(unique_results)} 条结果（去重后）")
+            if unique_results:
+                self.logger.info(f"第一条结果示例: {unique_results[0]}")
             return unique_results
 
         except Exception as e:

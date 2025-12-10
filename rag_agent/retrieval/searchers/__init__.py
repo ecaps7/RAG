@@ -5,10 +5,12 @@
 - VectorSearcher: 基于 Milvus/Ollama 的向量搜索
 - BM25Searcher: 基于 Jieba/BM25 的关键词搜索  
 - SQLRouter: 基于 SQLite 的结构化数据查询
+- WebSearcher: 基于 Tavily 的联网搜索
 """
 
 from .vector import VectorSearcher
 from .keyword import BM25Searcher
 from .sql import SQLRouter
+from .web import WebSearcher
 
-__all__ = ["VectorSearcher", "BM25Searcher", "SQLRouter"]
+__all__ = ["VectorSearcher", "BM25Searcher", "SQLRouter", "WebSearcher"]

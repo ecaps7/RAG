@@ -44,27 +44,49 @@ class RagAgent:
         self.logger.debug(f"Processing question: {question}")
         
         # 调用LangGraph状态机
+        from .core.types import TerminationInfo, RetrievalCache
+        
         initial_state = {
-            "question": question,
+            # 问题与迭代控制
             "original_question": question,
-            "retry_count": 0,
-            "max_retries": 3,
-            "sql_results": None,
-            "vector_results": [],
-            "bm25_results": [],
-            "fused_results": [],
-            "reranked_results": [],
-            "final_documents": [],
-            "documents": [],
-            "generation": "",
-            "hallucination_detected": False,
-            "followup_queries": [],
+            "current_query": question,
+            "current_hop": 0,
+            "max_hops": 5,
+            
+            # 增量记忆
             "accumulated_context": [],
-            "final_answer": None,
-            "web_search_needed": False,
+            "context_id_set": set(),
+            "entity_history": set(),
+            "query_history": [],
+            
+            # 缺口分析
+            "missing_info": [],
             "information_sufficient": False,
             "need_followup": False,
-            "query_history": [],
+            "web_search_needed": False,
+            
+            # 终止控制
+            "info_gain_log": [],
+            "consecutive_no_gain": 0,
+            "termination": TerminationInfo(
+                should_terminate=False,
+                reason="",
+                details=""
+            ),
+            
+            # 检索缓存
+            "retrieval_cache": RetrievalCache(),
+            
+            # 检索完成标志
+            "fusion_retrieval_done": False,
+            "sql_retrieval_done": False,
+            
+            # 生成与评估
+            "generation": None,
+            "hallucination_detected": False,
+            
+            # 最终输出
+            "final_answer": None,
         }
         
         t0 = time.perf_counter()
@@ -89,27 +111,49 @@ class RagAgent:
         self.logger.debug(f"Processing streaming question: {question}")
         
         # 调用LangGraph状态机获取结果
+        from .core.types import TerminationInfo, RetrievalCache
+        
         initial_state = {
-            "question": question,
+            # 问题与迭代控制
             "original_question": question,
-            "retry_count": 0,
-            "max_retries": 3,
-            "sql_results": None,
-            "vector_results": [],
-            "bm25_results": [],
-            "fused_results": [],
-            "reranked_results": [],
-            "final_documents": [],
-            "documents": [],
-            "generation": "",
-            "hallucination_detected": False,
-            "followup_queries": [],
+            "current_query": question,
+            "current_hop": 0,
+            "max_hops": 1,
+            
+            # 增量记忆
             "accumulated_context": [],
-            "final_answer": None,
-            "web_search_needed": False,
+            "context_id_set": set(),
+            "entity_history": set(),
+            "query_history": [],
+            
+            # 缺口分析
+            "missing_info": [],
             "information_sufficient": False,
             "need_followup": False,
-            "query_history": [],
+            "web_search_needed": False,
+            
+            # 终止控制
+            "info_gain_log": [],
+            "consecutive_no_gain": 0,
+            "termination": TerminationInfo(
+                should_terminate=False,
+                reason="",
+                details=""
+            ),
+            
+            # 检索缓存
+            "retrieval_cache": RetrievalCache(),
+            
+            # 检索完成标志
+            "fusion_retrieval_done": False,
+            "sql_retrieval_done": False,
+            
+            # 生成与评估
+            "generation": None,
+            "hallucination_detected": False,
+            
+            # 最终输出
+            "final_answer": None,
         }
         
         t0 = time.perf_counter()

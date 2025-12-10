@@ -57,37 +57,40 @@ class LLMHallucinationDetector(BaseHallucinationDetector):
         formatted_chunks = [self._format_chunk_for_detection(chunk) for chunk in chunks]
         
         prompt = """
-        You are an expert hallucination detector for a Retrieval-Augmented Generation (RAG) system.
-        Your task is to check if the generated answer contains any information that is not supported by the provided context chunks.
-        
-        For the given user question, generated answer, and context chunks, you must:
-        1. Compare the answer with the context chunks line by line
-        2. Identify any information in the answer that is not present in the context
-        3. Determine if this constitutes a hallucination
-        4. If hallucination is detected, provide a short reason indicating what information is missing or unsupported
-        5. If hallucination is detected, extract the specific hallucinated content
-        6. Assign a confidence score to your detection (0.0-1.0)
-        7. If no hallucination is detected, set reasoning to None
-        
-        Hallucination Criteria:
-        - Information that is completely absent from all context chunks
-        - Information that contradicts the context chunks
-        - Specific facts, figures, names, or dates not mentioned in the context
-        - Unsupported claims or assertions
-        
-        Non-Hallucination Criteria:
-        - Logical inferences based on the context
-        - Paraphrasing of context information
-        - General knowledge that is widely accepted and not in conflict with the context
-        
-        User Question:
-        {question}
-        
-        Generated Answer:
-        {answer}
-        
-        Context Chunks:
-        {chunks}
+你是一位专业的RAG系统幻觉检测专家，擅长识别生成的答案中是否包含未被上下文支持的信息。
+
+【用户问题】
+{question}
+
+【生成的答案】
+{answer}
+
+【上下文块】
+{chunks}
+
+【检测任务】
+请仔细比对生成的答案与提供的上下文，执行以下检测步骤：
+
+1. **逐句比对**：将答案中的每一句话与上下文进行比对
+2. **识别无据信息**：找出答案中不存在于任何上下文中的信息
+3. **判断幻觉性质**：评估这些无据信息是否构成幻觉
+4. **提供理由** (如果检测到幻觉)：简要说明哪些信息缺少支持或与上下文矛盾
+5. **提取幻觉内容** (如果检测到幻觉)：指出具体的幻觉文本
+6. **给出置信度** (0.0-1.0)：对检测结果的确定性评分
+7. **无幻觉处理**：如果未发现幻觉，将 reasoning 设置为 None
+
+【幻觉判断标准】
+
+**属于幻觉的情况**：
+- 信息在所有上下文中完全不存在
+- 信息与上下文明确矛盾或冲突
+- 具体的事实、数字、名称或日期在上下文中未提及
+- 无根据的断言或主张
+
+**不属于幻觉的情况**：
+- 基于上下文的合理推理和归纳
+- 对上下文信息的重新表述或转述
+- 公认的常识性知识，且不与上下文冲突
         """
         
         return prompt.format(
@@ -114,7 +117,7 @@ class LLMHallucinationDetector(BaseHallucinationDetector):
             
             # Get LLM response with structured output
             messages = [
-                {"role": "system", "content": "You are an expert hallucination detector."},
+                {"role": "system", "content": "你是一位专业的RAG系统幻觉检测专家。"},
                 {"role": "user", "content": prompt}
             ]
             

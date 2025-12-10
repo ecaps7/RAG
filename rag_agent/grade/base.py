@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
 from ..core.types import ContextChunk
@@ -25,6 +25,7 @@ class ReasoningResult:
     information_sufficient: bool  # Whether the information is sufficient to answer the question
     need_followup: bool  # Whether follow-up questions are needed
     web_search_needed: bool  # Whether web search is needed
+    missing_info: List = field(default_factory=list)  # List of missing information (MissingInfo objects)
 
 
 @dataclass

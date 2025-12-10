@@ -10,6 +10,7 @@ from rag_agent.core.nodes import (
     rrf_fusion_node,
     rerank_node,
     context_aggregation_node,
+    termination_check_node,
     reasoning_analyzer_node,
     followup_query_generation_node,
     answer_generation_node,
@@ -18,7 +19,7 @@ from rag_agent.core.nodes import (
     final_output_node,
     reasoning_conditional,
     hallucination_conditional,
-    aggregation_conditional
+    context_availability_conditional
 )
 
 # 构建状态机
@@ -32,6 +33,7 @@ graph.add_node("bm25_retrieval", bm25_retrieval_node)
 graph.add_node("rrf_fusion", rrf_fusion_node)
 graph.add_node("rerank", rerank_node)
 graph.add_node("context_aggregation", context_aggregation_node)
+graph.add_node("termination_check", termination_check_node)
 graph.add_node("reasoning_analyzer", reasoning_analyzer_node)
 graph.add_node("followup_query_generation", followup_query_generation_node)
 graph.add_node("answer_generation", answer_generation_node)
@@ -63,17 +65,20 @@ graph.add_edge("rerank", "context_aggregation")
 # 6. SQL生成执行 -> 上下文聚合（与重排结果并行到达，等待所有输入完成）
 graph.add_edge("sql_generation_execution", "context_aggregation")
 
-# 5. 上下文聚合 -> 条件路由（检查是否同时存在SQL结果和重排结果）
+# 7. 上下文聚合 -> 条件路由（检查是否有可用上下文）
 graph.add_conditional_edges(
     "context_aggregation",
-    aggregation_conditional,
+    context_availability_conditional,
     {
-        "reasoning_analyzer": "reasoning_analyzer",
+        "continue": "termination_check",
         "end": END
     }
 )
 
-# 6. 推理分析器 -> 条件路由
+# 8. 终止检查 -> 推理分析器
+graph.add_edge("termination_check", "reasoning_analyzer")
+
+# 9. 推理分析器 -> 条件路由
 graph.add_conditional_edges(
     "reasoning_analyzer",
     reasoning_conditional,
@@ -84,13 +89,13 @@ graph.add_conditional_edges(
     }
 )
 
-# 7. 追问生成 -> 查询重写（进入下一轮检索）
+# 10. 追问生成 -> 查询重写（进入下一轮检索）
 graph.add_edge("followup_query_generation", "query_rewrite")
 
-# 8. 答案生成 -> 幻觉检测
+# 11. 答案生成 -> 幻觉检测
 graph.add_edge("answer_generation", "hallucination_detection")
 
-# 9. 幻觉检测 -> 条件路由
+# 12. 幻觉检测 -> 条件路由
 graph.add_conditional_edges(
     "hallucination_detection",
     hallucination_conditional,
@@ -100,10 +105,10 @@ graph.add_conditional_edges(
     }
 )
 
-# 10. 联网搜索 -> 答案生成
+# 13. 联网搜索 -> 答案生成
 graph.add_edge("web_search", "answer_generation")
 
-# 11. 最终输出 -> END
+# 14. 最终输出 -> END
 graph.add_edge("final_output", END)
 
 # 编译状态机

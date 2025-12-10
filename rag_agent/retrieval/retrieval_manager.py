@@ -6,6 +6,7 @@ from rag_agent.core.types import ContextChunk
 from rag_agent.retrieval.searchers.sql import SQLRouter
 from rag_agent.retrieval.searchers.vector import VectorSearcher
 from rag_agent.retrieval.searchers.keyword import BM25Searcher
+from rag_agent.retrieval.searchers.web import WebSearcher
 from rag_agent.retrieval.rankers import reciprocal_rank_fusion
 from rag_agent.retrieval.types import SearchResult
 from rag_agent.retrieval.engine import LocalRetriever
@@ -18,6 +19,7 @@ class RetrievalManager:
         self.sql_router = SQLRouter()
         self.vector_searcher = VectorSearcher()
         self.bm25_searcher = BM25Searcher()
+        self.web_searcher = WebSearcher()
         self.local_retriever = LocalRetriever()
         # 从LocalRetriever中获取reranker
         self.reranker = self.local_retriever.reranker
@@ -54,3 +56,7 @@ class RetrievalManager:
     def hybrid_retrieve(self, query: str, top_k: int = 8) -> List[ContextChunk]:
         """执行混合检索"""
         return self.local_retriever.retrieve(query, top_k)
+    
+    def web_search(self, query: str, top_k: int = 5) -> List[SearchResult]:
+        """执行联网搜索"""
+        return self.web_searcher.search(query, top_k)

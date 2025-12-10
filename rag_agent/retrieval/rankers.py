@@ -129,12 +129,14 @@ class SemanticReranker:
         self.max_length = max_length
         self._model_available: Optional[bool] = None
         
-        # 确定设备
+        # 确定设备 - MPS 存在兼容性问题，强制使用 CPU
         if device is None:
             if torch.cuda.is_available():
                 self._device_str = "cuda"
             elif torch.backends.mps.is_available():
-                self._device_str = "mps"
+                # MPS 在某些情况下会出现张量维度限制问题，使用 CPU 更稳定
+                logger.info("检测到 MPS 设备，但由于兼容性问题，Reranker 将使用 CPU")
+                self._device_str = "cpu"
             else:
                 self._device_str = "cpu"
         else:
@@ -169,9 +171,10 @@ class SemanticReranker:
                         local_files_only=True,  # 仅从本地加载
                     ).eval()
                 elif self._device_str == "mps":
+                    # MPS 模式：使用 float32 避免精度问题
                     SemanticReranker._model = AutoModelForCausalLM.from_pretrained(
                         self.model_name,
-                        dtype=torch.float16,
+                        dtype=torch.float32,
                         trust_remote_code=True,
                         local_files_only=True,  # 仅从本地加载
                     ).to("mps").eval()
@@ -221,53 +224,60 @@ class SemanticReranker:
         if instruction is None:
             instruction = "Given a query, retrieve relevant passages that answer the query"
         
-        tokenizer = SemanticReranker._tokenizer
-        model = SemanticReranker._model
-        
-        # 获取 yes/no token ids
-        token_true_id = tokenizer.convert_tokens_to_ids("yes")
-        token_false_id = tokenizer.convert_tokens_to_ids("no")
-        
-        # 构建前缀和后缀
-        prefix = "<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be \"yes\" or \"no\".<|im_end|>\n<|im_start|>user\n"
-        suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
-        prefix_tokens = tokenizer.encode(prefix, add_special_tokens=False)
-        suffix_tokens = tokenizer.encode(suffix, add_special_tokens=False)
-        
-        # 格式化所有输入
-        pairs = [self._format_input(instruction, query, doc) for doc in documents]
-        
-        # Tokenize
-        inputs = tokenizer(
-            pairs, 
-            padding=False, 
-            truncation=True,
-            return_attention_mask=False, 
-            max_length=self.max_length - len(prefix_tokens) - len(suffix_tokens)
-        )
-        
-        # 添加前缀和后缀 tokens
-        for i, ele in enumerate(inputs['input_ids']):
-            inputs['input_ids'][i] = prefix_tokens + ele + suffix_tokens
-        
-        # Padding（不传递 max_length 以避免警告）
-        inputs = tokenizer.pad(inputs, padding=True, return_tensors="pt")
-        
-        # 移动到设备
-        device = SemanticReranker._device
-        for key in inputs:
-            inputs[key] = inputs[key].to(device)
-        
-        # 计算分数
-        with torch.no_grad():
-            batch_scores = model(**inputs).logits[:, -1, :]
-            true_vector = batch_scores[:, token_true_id]
-            false_vector = batch_scores[:, token_false_id]
-            batch_scores = torch.stack([false_vector, true_vector], dim=1)
-            batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
-            scores = batch_scores[:, 1].exp().tolist()
-        
-        return scores
+        try:
+            tokenizer = SemanticReranker._tokenizer
+            model = SemanticReranker._model
+            
+            # 获取 yes/no token ids
+            token_true_id = tokenizer.convert_tokens_to_ids("yes")
+            token_false_id = tokenizer.convert_tokens_to_ids("no")
+            
+            # 构建前缀和后缀
+            prefix = "<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be \"yes\" or \"no\".<|im_end|>\n<|im_start|>user\n"
+            suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            prefix_tokens = tokenizer.encode(prefix, add_special_tokens=False)
+            suffix_tokens = tokenizer.encode(suffix, add_special_tokens=False)
+            
+            # 格式化所有输入
+            pairs = [self._format_input(instruction, query, doc) for doc in documents]
+            
+            # Tokenize
+            inputs = tokenizer(
+                pairs, 
+                padding=False, 
+                truncation=True,
+                return_attention_mask=False, 
+                max_length=self.max_length - len(prefix_tokens) - len(suffix_tokens)
+            )
+            
+            # 添加前缀和后缀 tokens
+            for i, ele in enumerate(inputs['input_ids']):
+                inputs['input_ids'][i] = prefix_tokens + ele + suffix_tokens
+            
+            # Padding（不传递 max_length 以避免警告）
+            inputs = tokenizer.pad(inputs, padding=True, return_tensors="pt")
+            
+            # 移动到设备
+            device = SemanticReranker._device
+            for key in inputs:
+                inputs[key] = inputs[key].to(device)
+            
+            # 计算分数
+            with torch.no_grad():
+                batch_scores = model(**inputs).logits[:, -1, :]
+                true_vector = batch_scores[:, token_true_id]
+                false_vector = batch_scores[:, token_false_id]
+                batch_scores = torch.stack([false_vector, true_vector], dim=1)
+                batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
+                scores = batch_scores[:, 1].exp().tolist()
+            
+            return scores
+            
+        except Exception as e:
+            # 捕获 MPS 或其他设备相关错误，返回默认分数
+            logger.error(f"Reranker 打分失败 (可能是设备兼容性问题): {e}")
+            logger.warning(f"返回默认分数 0.5 用于 {len(documents)} 个文档")
+            return [0.5] * len(documents)
 
     def _score_single(self, query: str, document: str) -> float:
         """
@@ -328,18 +338,27 @@ class SemanticReranker:
             else:
                 doc_text = doc.content
 
-            # 截断过长的文档（Qwen3-Reranker 建议 8192 tokens 以内）
-            if len(doc_text) > 4000:
-                doc_text = doc_text[:4000]
+            # 截断过长的文档（更严格的长度限制以避免 MPS 问题）
+            # 使用 2000 字符限制（约 500-1000 tokens）
+            if len(doc_text) > 2000:
+                doc_text = doc_text[:2000]
             
             doc_texts.append(doc_text)
 
-        # 批量打分
+        # 批量打分（使用更小的批处理大小避免内存问题）
+        # 在 MPS/CPU 设备上使用更小的批次
+        effective_batch_size = min(batch_size, 4) if self._device_str in ["mps", "cpu"] else batch_size
         all_scores = []
-        for i in range(0, len(doc_texts), batch_size):
-            batch_docs = doc_texts[i:i + batch_size]
-            batch_scores = self._score_batch(query, batch_docs)
-            all_scores.extend(batch_scores)
+        
+        for i in range(0, len(doc_texts), effective_batch_size):
+            batch_docs = doc_texts[i:i + effective_batch_size]
+            try:
+                batch_scores = self._score_batch(query, batch_docs)
+                all_scores.extend(batch_scores)
+            except Exception as e:
+                logger.error(f"批次 {i//effective_batch_size + 1} 打分失败: {e}")
+                # 降级处理：使用默认分数
+                all_scores.extend([0.5] * len(batch_docs))
 
         # 构建重排序结果
         reranked_results = []

@@ -18,31 +18,50 @@ class FollowupQueryGenerator:
         Returns:
             包含追问查询的字典
         """
+        from rag_agent.core.types import QueryRecord
+        
         original_question = state["original_question"]
-        final_documents = state["final_documents"]
-        retry_count = state["retry_count"]
-        followup_queries = state.get("followup_queries", [])
+        accumulated_context = state.get("accumulated_context", [])
+        current_hop = state.get("current_hop", 0)
+        query_history = state.get("query_history", [])
+        missing_info = state.get("missing_info", [])
         
-        # 分析上下文，识别信息缺口
-        context_summary = self._summarize_context(final_documents)
-        gap_analysis = self._analyze_context_gaps(original_question, context_summary)
+        # 构建上下文总结
+        context_summary = self._summarize_context(accumulated_context)
         
-        # 生成追问查询
+        # 如果有结构化的缺口信息，使用其描述作为缺口分析
+        if missing_info and len(missing_info) > 0:
+            # 取优先级最高的缺口
+            top_gap = missing_info[0]
+            gap_analysis = top_gap.description
+        else:
+            # 否则通过LLM分析上下文缺口
+            gap_analysis = self._analyze_context_gaps(original_question, context_summary)
+        
+        # 基于缺口分析生成追问查询
         followup_prompt = self._build_followup_prompt(
             original_question, 
             context_summary, 
             gap_analysis, 
-            followup_queries
+            query_history
         )
-        followup_query = self.generator.generate(followup_prompt, "")
+        followup_result = self.generator.generate(followup_prompt, "")
+        followup_query = followup_result.text
         
-        # 更新状态
-        followup_queries.append(followup_query.text)
+        # 更新查询历史
+        new_record = QueryRecord(
+            hop=current_hop + 1,
+            query=followup_query,
+            intent="followup",
+            result_count=0,
+            new_context_count=0
+        )
+        query_history.append(new_record)
         
         return {
-            "followup_queries": followup_queries,
-            "question": followup_query.text,
-            "retry_count": retry_count + 1
+            "current_query": followup_query,
+            "query_history": query_history,
+            "current_hop": current_hop + 1
         }
     
     def _summarize_context(self, documents: List[ContextChunk]) -> str:
@@ -66,43 +85,61 @@ class FollowupQueryGenerator:
         """分析上下文信息缺口"""
         # 调用LLM分析信息缺口
         gap_prompt = f"""
-请分析以下问题和提供的上下文，识别出上下文中缺少哪些信息来回答问题：
+你是一位信息分析专家，擅长识别用户问题与现有上下文之间的知识缺口。
 
-问题：{question}
+【用户问题】
+{question}
 
-上下文总结：
+【已有上下文总结】
 {context_summary}
 
-请简要列出缺失的信息点，每行一个，使用数字序号标记：
+【缺口分析任务】
+请仔细对比用户问题和已有上下文，找出还缺少哪些关键信息才能完整回答该问题。
+
+请以条目列表形式输出缺失的信息点，每行一个，使用数字序号标记：
 """
         
         gap_result = self.generator.generate(gap_prompt, "")
         return gap_result.text
     
     def _build_followup_prompt(self, question: str, context_summary: str, 
-                              gap_analysis: str, followup_history: List[str]) -> str:
+                              gap_analysis: str, query_history: List) -> str:
         """构建追问生成提示"""
-        followup_history_text = "\n".join([f"{i+1}. {q}" for i, q in enumerate(followup_history)]) if followup_history else "无"
+        if query_history:
+            followup_history_text = "\n".join([
+                f"{i+1}. Hop {record.hop}: {record.query}"
+                for i, record in enumerate(query_history)
+            ])
+        else:
+            followup_history_text = "无"
         
         return f"""
-你是一个专业的AI助手，需要根据当前上下文和用户的原始问题，生成针对性的追问查询。
+你是一位智能问答系统的信息补充专家，擅长根据信息缺口生成精准的追问查询。
 
-原始问题：{question}
+【用户原始问题】
+{question}
 
-当前上下文总结：
+【当前已有上下文总结】
 {context_summary}
 
-信息缺口分析：
+【识别出的信息缺口】
 {gap_analysis}
 
-之前的追问历史：
+【历史追问记录】
 {followup_history_text}
 
-请生成一个针对性的追问查询，用于获取缺失的信息，要求：
-1. 追问应该具体、明确，针对识别出的信息缺口
-2. 保持与原始问题的相关性
-3. 输出简洁明了的追问查询，不要添加任何解释
-4. 避免重复之前的追问
+【追问生成要求】
+请基于上述信息缺口分析，生成一个适合检索系统的查询语句，用于获取缺失的关键信息：
 
-追问查询：
+1. **直接针对缺口**：追问应直接针对已识别出的主要信息缺口，具体明确
+2. **提取关键实体和概念**：从缺口描述中提取核心关键词、实体名称和指标
+3. **保持相关性**：追问必须与原始问题紧密相关，服务于回答原问题的目标
+4. **避免重复**：不要重复之前的追问内容，从新角度补充信息
+5. **简洁清晰**：直接输出一个简洁有效的查询语句（而不是描述性文字），无需任何解释说明
+
+【示例】
+缺口描述：“缺少中信银行的房地产业不良率数据，无法完整比较两家银行的房地产业不良率。”
+生成追问：“中信银行房地产业不良贷款率”
+
+【生成的追问查询】
 """

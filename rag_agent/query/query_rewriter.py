@@ -17,19 +17,35 @@ class QueryRewriter:
         Returns:
             包含重写后查询的字典
         """
+        from rag_agent.core.types import QueryRecord
+        
+        current_query = state["current_query"]
         original_question = state["original_question"]
         query_history = state.get("query_history", [])
+        current_hop = state.get("current_hop", 0)
         
-        # 调用LLM生成重写后的查询
-        rewrite_prompt = self._build_rewrite_prompt(original_question, query_history)
+        # 构建重写 Prompt（只关注当前查询优化，不考虑历史）
+        rewrite_prompt = self._build_rewrite_prompt(current_query)
         rewritten_query = self.generator.generate(rewrite_prompt, "")
         
-        # 更新查询历史
-        query_history.append(rewritten_query.text)
+        # 如果是第一跳，初始化查询历史
+        if current_hop == 0 and not query_history:
+            query_history = [
+                QueryRecord(
+                    hop=0,
+                    query=rewritten_query.text,  # 使用重写后的查询
+                    intent="initial",
+                    result_count=0,
+                    new_context_count=0
+                )
+            ]
+            return {
+                "current_query": rewritten_query.text,
+                "query_history": query_history
+            }
         
         return {
-            "question": rewritten_query.text,
-            "query_history": query_history
+            "current_query": rewritten_query.text
         }
     
     def decompose_query(self, question: str) -> List[str]:
@@ -50,40 +66,48 @@ class QueryRewriter:
         
         return sub_queries
     
-    def _build_rewrite_prompt(self, original_question: str, query_history: List[str]) -> str:
-        """构建查询重写提示"""
-        history_text = "\n".join([f"{i+1}. {q}" for i, q in enumerate(query_history)]) if query_history else "无"
+    def _build_rewrite_prompt(self, current_query: str) -> str:
+        """构建查询重写提示
         
+        注意：查询重写只关注当前查询本身的优化，不考虑历史查询记录。
+        历史信息应该在追问生成或多跳推理决策阶段使用。
+        """
         return f"""
-你是一个专业的查询重写助手，需要将用户的原始问题重写为更适合检索系统的查询。
+你是一位资深的检索系统优化专家，擅长将用户的自然语言问题转化为高效的检索查询。
 
-原始问题：{original_question}
-查询历史：
-{history_text}
+【当前查询】
+{current_query}
 
-请根据以下要求重写查询：
-1. 保持原始问题的核心意图
-2. 添加相关的同义词和术语
-3. 优化查询结构，提高检索效果
-4. 输出简洁明了的重写后的查询，不要添加任何解释
+【优化要求】
+请将上述查询优化为更适合检索系统的查询语句：
 
-重写后的查询：
+1. **保持核心意图**：精准把握查询的真实需求，不偏离问题本质
+2. **扩展关键术语**：补充相关的专业术语、同义词、缩写或全称
+3. **优化查询结构**：调整词序和表达方式，使其更符合知识库的组织形式
+4. **提取关键点**：突出查询中的核心关键词和实体
+5. **简洁明确**：直接输出优化后的查询语句，无需任何解释说明
+
+【优化后的查询】
 """
     
     def _build_decompose_prompt(self, question: str) -> str:
         """构建查询分解提示"""
         return f"""
-你是一个专业的查询分解助手，需要将复杂的用户问题分解为多个简单的子查询。
+你是一位擅长问题分析的专家，能够将复杂的多层次问题拆解为清晰的子任务。
 
-复杂问题：{question}
+【复杂问题】
+{question}
 
-请根据以下要求分解查询：
-1. 识别问题中的多个子任务或子问题
-2. 每个子查询应该独立、具体
-3. 子查询数量应根据问题复杂度合理确定
-4. 输出格式为每行一个子查询，使用数字序号标记
+【分解要求】
+请将上述复杂问题分解为多个独立的子查询，以便逐步检索和解答：
 
-分解后的子查询：
+1. **识别子任务**：从问题中提取出所有需要分别回答的子问题或子任务
+2. **保持独立性**：每个子查询应当独立完整，可以单独执行检索
+3. **具体明确**：子查询应具体且目标明确，避免模糊表述
+4. **合理数量**：根据问题复杂度确定子查询数量（通常2-5个），避免过度拆分
+5. **标准格式**：每行一个子查询，使用数字序号（如1.)标记
+
+【分解后的子查询】
 """
     
     def _parse_sub_queries(self, response: str) -> List[str]:
