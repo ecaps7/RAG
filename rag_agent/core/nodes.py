@@ -340,7 +340,11 @@ def answer_generation_node(state: AgentState) -> dict:
 def hallucination_detection_node(state: AgentState) -> dict:
     """幻觉检测节点"""
     logger.info(f"[hallucination_detection_node] 开始幻觉检测")
-    
+
+    if state["termination"].should_terminate:
+        logger.info(f"[hallucination_detection_node] 终止条件触发: {state['termination'].reason}")
+        return {"hallucination_detected": False}
+
     # 使用LLM幻觉检测器进行幻觉检测
     result = hallucination_detector.detect(
         question=state["original_question"],
@@ -434,12 +438,6 @@ def reasoning_conditional(state: AgentState) -> str:
 
 def hallucination_conditional(state: AgentState) -> str:
     """幻觉检测条件路由"""
-    # 1. 优先检查终止条件 - 如果已触发终止，直接输出最终答案（跳过幻觉检测的追问）
-    if state["termination"].should_terminate:
-        logger.info(f"[hallucination_conditional] 检测到终止条件({state['termination'].reason})，强制输出答案，跳过幻觉检测的追问流程")
-        return "final_output"
-    
-    # 2. 正常流程：检查是否有幻觉
     if state["hallucination_detected"]:
         logger.info(f"[hallucination_conditional] 检测到幻觉，进入追问流程")
         return "followup_query_generation"

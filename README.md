@@ -1,183 +1,169 @@
-# RAG 智能体
+# RAG Agent
 
-本项目实现了一个可路由的 RAG Pipeline：从意图识别、检索路由、置信度融合到答案生成与流式输出，覆盖本地 PDF 与 Web 检索两路，支持批量问答与持久化向量索引。
+基于 LangGraph 的智能检索增强生成系统，支持多跳推理和幻觉检测。
 
-## Pipeline 概览
+## 核心特性
 
-```
-┌────────────────────────────────────────────────────────┐ 
-│                    🧠  RAG Agent Pipeline              │ 
-└────────────────────────────────────────────────────────┘ 
-                          │ 
-                          ▼ 
-┌─────────────────────────────────────────────┐ 
-│ ① User Question                             │ 
-│   e.g. “2025Q2 的净息差为何下降？”         │ 
-└─────────────────────────────────────────────┘ 
-                          │ 
-                          ▼ 
-┌─────────────────────────────────────────────┐ 
-│ ② Intent Classifier (意图分类器)            │ 
-│   ├─ data_lookup         → 查具体数值        │ 
-│   ├─ definition_lookup    → 查定义口径        │ 
-│   ├─ reasoning            → 解释/综合分析     │ 
-│   ├─ external_context     → 宏观/行业外部信息 │ 
-│   ├─ forecast             → 预测/展望问题     │ 
-│   └─ meta_query           → 关于文档本身      │ 
-└─────────────────────────────────────────────┘ 
-                          │ 
-                  ┌───────┴──────────────────────┐ 
-                  ▼                              ▼ 
-        ┌─────────────────────┐         ┌───────────────────────┐ 
-        │ ③ Retrieval Router  │         │ (Rule + LLM 判断)     │ 
-        └─────────────────────┘         └───────────────────────┘ 
-                          │ 
-                          ▼ 
-┌───────────────────────────────────────────────┐ 
-│ ④ Route by Intent                             │ 
-│   ├─ data_lookup / definition / meta → Local   │ 
-│   ├─ external_context / forecast     → Web     │ 
-│   ├─ reasoning                      → Both     │ 
-└───────────────────────────────────────────────┘ 
-                          │ 
-                 ┌────────┴─────────┐ 
-                 ▼                  ▼ 
-┌──────────────────┐  ┌──────────────────┐ 
-│ Local Retriever  │  │ Web Retriever    │ 
-│ (e.g. PDF RAG)   │  │ (e.g. WebSearch) │ 
-└──────────────────┘  └──────────────────┘ 
-                 │                  │ 
-                 └───────┬──────────┘ 
-                         ▼ 
-┌───────────────────────────────────────────────┐ 
-│ ⑤ Confidence Fusion Layer (置信度融合层)      │ 
-│   Inputs:                                      │ 
-│     - similarity_score                         │ 
-│     - source_reliability (local=0.9, web=0.6)  │ 
-│     - recency_score                            │ 
-│   score_i = 0.6*sim + 0.3*reliab + 0.1*recency │ 
-│   → 归一化 + MMR 选 Top-K 并融合               │ 
-└───────────────────────────────────────────────┘ 
-                         │ 
-                         ▼ 
-┌───────────────────────────────────────────────┐ 
-│ ⑥ Answer Generator (LLM)                      │ 
-│   - 输入：问题 + 融合后的上下文                │ 
-│   - 输出：引用本地报告 + 外部背景的完整答案     │ 
-│   例：                                         │ 
-│   “根据招商银行2025年半年报，净息差下降5bp... │ 
-│     同期行业整体亦受LPR下降影响...”            │ 
-└───────────────────────────────────────────────┘ 
-                         │ 
-                         ▼ 
-┌───────────────────────────────────────────────┐ 
-│ ⑦ Final Answer to User                        │ 
-│   - 结合本地证据 + 外部语境                   │ 
-│   - 附出处引用与置信度标注                   │ 
-└───────────────────────────────────────────────┘ 
+- **混合检索**：SQL路由 + 向量检索(Milvus) + BM25关键词检索，RRF融合 + 语义重排序(Qwen3-Reranker)
+- **多跳推理**：基于LangGraph状态机的迭代检索与推理分析
+- **幻觉检测**：检测并修正生成内容中的幻觉信息
+- **联网搜索**：信息不足时自动触发Tavily外部搜索
+- **多模态支持**：文本、表格、结构化数据统一处理
+- **流式输出**：实时流式问答响应，支持引用标注
+
+## 技术栈
+
+- **框架**：LangGraph + LangChain
+- **模型**：DeepSeek Chat、Qwen3-Embedding、Qwen3-Reranker
+- **检索**：Milvus(向量) + BM25(关键词) + SQLite(结构化)
+- **搜索**：Tavily (联网搜索)
+
+## 快速开始
+
+### 环境配置
+
+```bash
+# 安装依赖
+pip install -r requirements.txt
+
+# 配置环境变量 .env
+DEEPSEEK_API_KEY=your_key
+TAVILY_API_KEY=your_key
+OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-## 模块映射与实现
+### 命令行使用
 
-- 意图分类器：`rag_agent/router/intent_classifier.py`（调用 `rag_agent/llm/classifier_llm.py`）
-  - LLM 生成严格 JSON：`intent`、`confidence`、`need_web`、`need_local` 等。
-  - 允许的意图集：data_lookup、definition_lookup、reasoning、external_context、forecast、meta_query。
+```bash
+# 单次问答
+python -m rag_agent.cli "问题"
 
-- 检索路由：`rag_agent/router/retrieval_router.py`
-  - 规则：
-    - data_lookup / definition_lookup / meta_query → 仅本地。
-    - external_context / forecast → 仅 Web。
-    - reasoning → 本地 + Web 双路。
+# 交互模式
+python -m rag_agent.cli
 
-- 本地检索：`rag_agent/retriever/local_retriever.py`
-  - 组合 BM25 候选 + 向量检索（MMR），可选交叉编码器重排（`BAAI/bge-reranker-v2-m3`）。
-  - 向量库通过 `rag_agent/vectorstore.py` 访问，支持 FAISS 持久化或内存回退。
+# 调试模式
+python -m rag_agent.cli "问题" --debug
 
-- Web 检索：`rag_agent/retriever/web_retriever.py`
-  - 通过 `rag_agent/utils/websearch.py` 调用 Tavily；域名映射控制可靠性（如 `gov.cn=0.95`）。
+# 批量问答
+python -m rag_agent.cli --input questions.txt --output answers.jsonl
+```
 
-- 置信度融合层：`rag_agent/router/fusion_layer.py`
-  - 分数：`score = w_sim*similarity + w_rel*reliability + w_rec*recency`；权重按意图自适应。
-  - 支持批次归一化（minmax/zscore）与 MMR 多样化选择（`alpha` 可调）。
+### Web 界面
 
-- 答案生成：`rag_agent/llm/answer_generator.py`
-  - 两种模式：严格 JSON 输出（含 `answer/citations/confidence`）与流式纯文本输出。
-  - 引用优先来自 `citation/title/source_id`，避免重复。
+```bash
+# 启动Web服务
+uvicorn web_server:app --host 0.0.0.0 --port 8000
 
-- 总线与编排：`rag_agent/pipeline.py`
-  - 串联“分类 → 路由 → 检索 → 融合 → 生成”，并在 `meta` 中记录意图、命中条数等。
+# 浏览器访问
+http://localhost:8000
+```
 
-## 使用说明
+### Python API
 
-- 单次问答（流式输出）：
-  - `python -m rag_agent.cli "你的问题"`
-- **调试模式**（显示 pipeline 每层详细日志）：
-  - `python -m rag_agent.cli --debug "你的问题"`
-  - 调试输出包括：意图分类、检索路由、本地/Web 检索结果、融合层排序、生成结果等
-  - 使用不同颜色区分各阶段：🧠 意图(青色)、🔀 路由(黄色)、📚 本地(绿色)、🌐 Web(蓝色)、⚗️ 融合(品红)、✨ 生成(红色)
-  - 每个步骤显示耗时（⏱），最后汇总展示 Timing Breakdown
-- 交互模式（REPL）：
-  - `python -m rag_agent.cli`，逐条输入问题，输入 `/q` 退出。
-  - 交互模式也支持调试：`python -m rag_agent.cli --debug`
-  - 开启短期记忆（LangGraph 包裹式接入）：
-    - `python -m rag_agent.cli --enable-memory`
-    - 可选指定会话ID：`--thread-id your-session-id`（默认使用 `--trace-id` 或 `repl`）
-- 批量问答到文件（JSONL）：
-  - 准备一个 `questions.txt`，每行一个问题。
-  - 运行：`python -m rag_agent.cli --input questions.txt --output outputs/answers.jsonl`
-  - 追加写入：加 `--append`；可选 `--trace-id` 便于日志追踪。
-  - 输出为 JSONL，每行包含：`question`、`answer`、`citations`、`confidence`、`meta`。
+```python
+from rag_agent import RagAgent
 
-### 短期记忆说明
+agent = RagAgent()
 
-- 类型：线程级短期记忆，仅用于保留多轮对话上下文，不作为新的证据来源。
-- 行为：记忆包裹外层对话，内部检索与生成仍只依据当轮 `contexts` 输出与引用。
-- 依赖：`langgraph`（未安装或初始化失败时自动回退到普通模式）。
+# 标准问答
+answer = agent.run("问题")
+print(answer.text)
 
-## 数据预处理与向量索引
+# 流式问答
+stream, citations = agent.run_stream("问题")
+for chunk in stream:
+    print(chunk, end="", flush=True)
+```
 
-- PDF 预处理为 JSONL：
-  - `python -m rag_agent.common.process_pdf --input_dir data --output_dir outputs`
-  - 生成：`outputs/text_chunks.jsonl`、`outputs/table_chunks.jsonl`、`outputs/all_chunks.jsonl`
+## 架构设计
 
-- 构建/更新向量库（FAISS 或内存）：
-  - `python -m rag_agent.utils.embed_and_store --backend faiss --faiss_dir outputs/vector_store --inputs outputs/all_chunks.jsonl --dedup`
-  - 运行时也可通过环境变量触发重建：`REBUILD_VECTOR_STORE=true`
+### 总览
 
-## 配置（.env）
+```mermaid
+graph TD
+    Start([用户提问]) --> Rewrite(查询重写/分解)
+    
+    %% 进入检索循环入口
+    Rewrite --> Retrieval_Entry((检索入口))
+    
+    subgraph Iterative_Retrieval_Loop [迭代检索循环]
+        direction TB
+        Retrieval_Entry --> Parallel_Start((并行分发))
+        
+        %% 并行检索层 (保持原样)
+        Parallel_Start --> SQL_Check{SQL?}
+        SQL_Check -->|是| SQL_Gen(SQL 生成)
+        SQL_Check -->|否| SQL_Skip(跳过)
+        
+        Parallel_Start --> Vector_Search(Vector 检索)
+        Parallel_Start --> BM25_Search(BM25 检索)
+        
+        Vector_Search & BM25_Search --> RRF_Fusion(RRF 融合)
+        RRF_Fusion --> Reranker(重排 Rerank)
+        
+        %% 聚合当前轮次信息
+        SQL_Gen & SQL_Skip & Reranker --> Aggregator(上下文聚合)
+        
+        %% 核心变化：推理与决策
+        Aggregator --> Reasoner{推理分析器}
+    end
+    
+    Aggregator -->|循环次数达到上限| Generator
+    
+    %% 决策分支
+    Reasoner -->|信息充足| Generator(答案生成)
+    Reasoner -->|信息完全无关| Web_Search(联网搜索 - 兜底)
+    
+    %% 关键路径：跨文本的多跳逻辑
+    Reasoner -->|发现缺口/需要多跳| FollowUp_Gen(生成追问 Query)
+    FollowUp_Gen -->|带着新 Query 和旧上下文| Retrieval_Entry
+    
+    %% 生成后检测
+    Generator --> Hallucination_Check{幻觉检测}
+    Hallucination_Check -->|通过或循环次数上限| End([最终输出])
+    Hallucination_Check -->|失败| FollowUp_Gen
+    
+    Web_Search --> Generator
 
-- 模型与温度：
-  - `RESPONSE_MODEL=deepseek:deepseek-chat`
-  - `RESPONSE_TEMPERATURE=0.7`
-- API Key（任选其一或组合）：
-  - `DEEPSEEK_API_KEY=...` 或 `GOOGLE_API_KEY=...`
-  - Doubao/Ark：`ARK_API_KEY=...`，`ARK_BASE_URL=...`
-  - Tavily（Web 检索）：`TAVILY_API_KEY=...`
-- 检索与索引：
-  - `OUTPUTS_DIR=outputs`
-  - `ALL_CHUNKS_PATH=outputs/all_chunks.jsonl`
-  - `VECTOR_STORE_PATH=outputs/vector_store`
-  - `REBUILD_VECTOR_STORE=false`
-  - `HF_EMBED_MODEL=Qwen/Qwen3-Embedding-0.6B`
-  - `USE_MMR=true`，`MMR_FETCH_MULTIPLIER=3.0`，`MMR_LAMBDA_MULT=0.3`
-  - `USE_CROSS_ENCODER=true`，`CROSS_ENCODER_MODEL=BAAI/bge-reranker-v2-m3`
-  - `BM25_K1=1.5`，`BM25_B=0.75`
-- 融合层：
-  - `FUSION_USE_NORMALIZATION=true`，`FUSION_NORM_METHOD=minmax`
-  - `FUSION_USE_MMR=true`，`FUSION_MMR_ALPHA=0.35`，`FUSION_MMR_FETCH_MULTIPLIER=2.5`
-- **可观测性（LangSmith）**：
-  - `LANGCHAIN_TRACING_V2=true`：启用 LangSmith 追踪
-  - `LANGCHAIN_API_KEY=...`：LangSmith API Key
-  - `LANGCHAIN_PROJECT=rag-agent`：LangSmith 项目名称（可选）
-  - 启用后，所有 LLM 调用会自动上报到 LangSmith 控制台
+    %% 样式
+    classDef loop fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    class Reasoner,FollowUp_Gen loop;
+```
 
-## 路由与 Top-K
+### 检索流程
 
-- `TOP_K`: 本地检索 `5`，Web 检索 `5`，融合层 `6`（可在配置中调整）。
-- 来源可靠性：`local=0.9`，`web=0.6`（对部分域名可提升，如 `gov.cn=0.95`）。
+```
+查询重写 → 并行检索(Vector + BM25 + SQL) → RRF融合 → 重排序 → 上下文聚合
+```
 
-## 输出
+### 推理流程
 
-- 流式模式：终端先打印最终答案文本，再打印 `Citations` 列表。
-- 批量模式（JSONL）：每行包含：
-  - `question`，`answer`（文本），`citations`（字符串数组），`confidence`（0-1），`meta`（诊断信息）。
+```
+推理分析 → 信息充分性判断 → { 答案生成 | 追问检索 | 联网搜索 } → 幻觉检测 → 最终输出
+```
+
+## 目录结构
+
+```
+rag_agent/
+├── core/           # 核心状态机与类型定义
+├── retrieval/      # 混合检索引擎
+├── generation/     # 答案生成
+├── grade/          # 推理分析与幻觉检测
+├── query/          # 查询改写与追问生成
+├── llm/            # LLM服务封装
+└── config/         # 配置管理
+```
+
+## 配置说明
+
+关键参数见 `.env` 文件：
+
+- `RESPONSE_MODEL`: 生成模型名称(默认: deepseek-chat)
+- `TOP_K_RETRIEVAL`: 检索文档数量(默认: 8)
+- `RERANKER_MODEL`: 重排模型路径
+- `USE_MMR`: 启用最大边际相关性(默认: true)
+
+## License
+
+MIT
