@@ -17,6 +17,7 @@ from rag_agent.core.nodes import (
     hallucination_detection_node,
     web_search_node,
     final_output_node,
+    terminate_conditional,
     reasoning_conditional,
     hallucination_conditional,
     context_availability_conditional
@@ -76,7 +77,14 @@ graph.add_conditional_edges(
 )
 
 # 8. 终止检查 -> 推理分析器
-graph.add_edge("termination_check", "reasoning_analyzer")
+graph.add_conditional_edges(
+    "termination_check",
+    terminate_conditional,
+    {
+        "continue": "reasoning_analyzer",
+        "answer_generation": "answer_generation"
+    }
+)
 
 # 9. 推理分析器 -> 条件路由
 graph.add_conditional_edges(

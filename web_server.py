@@ -192,12 +192,12 @@ if __name__ == "__main__":
     
     # 预热模型
     logger.info("预热RAG Agent模型...")
-    print("预热RAG Agent模型...", file=sys.stderr)
+    # print("预热RAG Agent模型...", file=sys.stderr)
     try:
         from rag_agent.cli import warmup_models
         warmup_models()
         logger.info("模型预热完成")
-        print("模型预热完成", file=sys.stderr)
+        # print("模型预热完成", file=sys.stderr)
     except Exception as e:
         logger.warning(f"模型预热失败: {e}")
         print(f"模型预热失败: {e}", file=sys.stderr)

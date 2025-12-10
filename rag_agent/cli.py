@@ -121,10 +121,13 @@ def format_citations(
 
 
 def warmup_models():
-    """预热模型：预先加载搜索引擎组件和 Reranker 模型到缓存。
+    """预热模型：预先加载搜索引擎组件、Embedding 模型和 Reranker 模型到缓存。
     
     这样在用户输入第一个问题时就可以直接使用缓存，无需等待模型加载。
-    使用 LocalRetriever 架构（整合了 Vector/BM25/SQL）+ Reranker 模型。
+    预热内容：
+    1. LocalRetriever (Milvus + BM25 + SQL)
+    2. Ollama Embedding 模型 (qwen3-embedding:4b)
+    3. Reranker 模型 (Qwen3-Reranker-0.6B)
     """
     import time
     
@@ -150,6 +153,22 @@ def warmup_models():
     except Exception as e:
         if debug:
             logger.warning(f"LocalRetriever 加载失败: {e}")
+    
+    # 预热 Ollama Embedding 模型
+    try:
+        import ollama
+        from .config import get_config
+        config = get_config()
+        if debug:
+            logger.debug(f"预热 Embedding 模型 ({config.ollama_embed_model})...")
+        t0 = time.time()
+        # 使用一个短文本触发模型加载
+        _ = ollama.embeddings(model=config.ollama_embed_model, prompt="预热")
+        if debug:
+            logger.debug(f"Embedding 模型就绪 (took {time.time() - t0:.2f}s)")
+    except Exception as e:
+        if debug:
+            logger.warning(f"Embedding 模型加载失败: {e}")
     
     # 预热 Reranker 模型（HuggingFace Qwen3-Reranker）
     try:

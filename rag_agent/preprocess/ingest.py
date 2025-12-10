@@ -24,9 +24,9 @@ OLLAMA_MODEL = "qwen3-embedding:4b"
 EMBEDDING_DIM = 2560  # Qwen3-Embedding 4B 的标准维度
 
 # LLM 配置（用于结构化指标提取）- OpenAI-compatible API
-LLM_API_BASE = os.getenv("LLM_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-LLM_API_KEY = os.getenv("LLM_API_KEY", os.getenv("DASHSCOPE_API_KEY", ""))
-LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v3.2")
+LLM_API_BASE = os.getenv("LLM_API_BASE", "http://localhost:11434/v1")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "ollama")  # Ollama 不需要真实 API Key
+LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:30b-a3b-instruct-2507-q4_K_M")
 
 # 输入数据文件
 FILE_TABLE = 'outputs/CITIC-2025-q1/CITIC-2025-q1-table.json'
@@ -41,6 +41,60 @@ EXCLUDE_TABLE_KEYWORDS = [
     "股东情况", "股东信息", "董事", "监事", "高管",
     "公司治理", "关联交易", "重大事项", "公司基本情况"
 ]
+
+# ================= 数据加载函数 =================
+
+def load_table_json(file_path: str) -> tuple[dict, list[dict]]:
+    """
+    加载新格式的表格JSON文件
+    
+    格式: {document: {...}, tables: [...]}
+    
+    Returns:
+        (document_context, tables) 元组
+        - document_context: 文档级元数据字典
+        - tables: 标准化后的表格列表
+    """
+    with open(file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    if not isinstance(data, dict) or 'tables' not in data:
+        raise ValueError(f"❌ 无效的JSON格式: {file_path}\n期望格式: {{document: {{...}}, tables: [...]}}")
+    
+    doc = data.get('document', {})
+    tables = data.get('tables', [])
+    
+    # 构造标准化的 document_context
+    doc_ctx = {
+        'company_name': doc.get('company_full', ''),
+        'company_short': doc.get('company', ''),
+        'stock_code': doc.get('stock_code', ''),
+        'report_period': doc.get('report_period', ''),
+        'report_type': doc.get('report_type', ''),
+        'fiscal_year': doc.get('fiscal_year', ''),
+        'data_scope': '集团'
+    }
+    
+    # 标准化表格数据
+    normalized_tables = []
+    for table in tables:
+        normalized_tables.append({
+            'id': table.get('id', 'unknown'),
+            'content': table.get('summary', ''),
+            'page': table.get('page', 1) - 1,  # 1-based -> 0-based
+            'document_context': doc_ctx,
+            'metadata': {
+                'raw_code': table.get('raw_html', ''),
+                'section_path': table.get('section', []),
+                'preceding_text': table.get('context', {}).get('before', ''),
+                'following_text': table.get('context', {}).get('after', ''),
+                'source': doc.get('source', ''),
+                'bbox': table.get('bbox', [])  # 添加bbox支持
+            }
+        })
+    
+    return doc_ctx, normalized_tables
+
 
 # ================= 核心函数 =================
 
@@ -327,10 +381,11 @@ def main():
 
     # 3. 加载数据
     print("📂 正在读取 JSON 文件...")
-    with open(FILE_TABLE, 'r', encoding='utf-8') as f:
-        table_data = json.load(f)
+    doc_ctx, table_data = load_table_json(FILE_TABLE)
     with open(FILE_TEXT, 'r', encoding='utf-8') as f:
         text_data = json.load(f)
+    print(f"   ✓ 加载 {len(table_data)} 个表格, {len(text_data)} 个文本块")
+    print(f"   ✓ 文档: {doc_ctx.get('company_short', 'Unknown')} - {doc_ctx.get('report_period', 'Unknown')}")
 
     # ---------------------------------------------------------
     # A. SQL Layer: 使用 LLM 自动提取结构化指标

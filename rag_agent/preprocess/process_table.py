@@ -10,15 +10,13 @@ Input: Marker JSON format with block_type="Table"
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
 from dataclasses import dataclass, field
-from enum import Enum
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -47,15 +45,18 @@ class TableConfig:
         if not self.api_base_url:
             self.api_base_url = os.getenv(
                 "TABLE_LLM_BASE_URL", 
-                "https://ark.cn-beijing.volces.com/api/v3"
+                "http://localhost:11434/v1"  # Ollama OpenAI-compatible API
             )
         if not self.api_key:
             self.api_key = os.getenv(
                 "TABLE_LLM_API_KEY", 
-                os.getenv("ARK_API_KEY", "")
+                "ollama"  # Ollama doesn't require real API key
             )
         if not self.model:
-            self.model = os.getenv("TABLE_LLM_MODEL", "doubao-seed-1-6-251015")
+            self.model = os.getenv(
+                "TABLE_LLM_MODEL", 
+                "qwen3:30b-a3b-instruct-2507-q4_K_M"  # 统一使用qwen3模型
+            )
     
     @classmethod
     def from_env(cls) -> "TableConfig":
@@ -228,24 +229,25 @@ class ExtractedTable:
 @dataclass  
 class ProcessedTable:
     """A fully processed table with summary."""
-    type: str = "table"               # Document type
     id: str = ""                      # Unique table identifier
     content: str = ""                 # LLM-generated summary
-    embedding_content: str = ""       # Content for vector retrieval
-    page: int = 0                     # Page number
+    page: int = 0                     # Page number (0-based internally)
     document_context: DocumentContext = field(default_factory=DocumentContext)
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary format."""
+        """Convert to simplified dictionary format."""
         return {
-            "type": self.type,
             "id": self.id,
-            "content": self.content,
-            "embedding_content": self.embedding_content,
-            "page": self.page,
-            "document_context": self.document_context.to_dict(),
-            "metadata": self.metadata,
+            "summary": self.content,
+            "page": self.page + 1,  # 改为 1-based
+            "section": self.metadata.get("section_path", []),
+            "raw_html": self.metadata.get("raw_code", ""),
+            "context": {
+                "before": self.metadata.get("preceding_text", ""),
+                "after": self.metadata.get("following_text", "")
+            },
+            "bbox": self.metadata.get("bbox", [])
         }
 
 
@@ -586,39 +588,20 @@ class TableProcessor:
         else:
             summary = ""
         
-        # Build context prefix for embedding
-        section_path_str = " > ".join(table.context.section_path) if table.context.section_path else ""
-        context_prefix = ""
-        if self.document_context.company_short:
-            context_prefix += f"【来源: {self.document_context.company_short}】"
-        if section_path_str:
-            context_prefix += f"【章节: {section_path_str}】"
-        
-        embedding_content = f"{context_prefix}\n{summary}" if summary else ""
-        
-        # Compute content hash
-        content_hash = hashlib.sha1(table.raw_code.encode("utf-8")).hexdigest()[:12]
-        
         # Build metadata
         metadata = {
             "source": table.source,
             "page": table.page,
-            "page_display": table.page + 1,  # 1-indexed for display
             "section_path": table.context.section_path,
-            "section": section_path_str,
             "raw_code": table.raw_code,
-            "content_hash": content_hash,
-            "block_id": table.block_id,
             "bbox": table.bbox,
             "preceding_text": table.context.preceding_text,
             "following_text": table.context.following_text,
         }
         
         return ProcessedTable(
-            type="table",
             id=table.id,
             content=summary,
-            embedding_content=embedding_content,
             page=table.page,
             document_context=self.document_context,
             metadata=metadata,
@@ -673,9 +656,23 @@ def process_and_save(
     tables = process_json_file(json_path, generate_summaries, config)
     
     if output_path is None:
-        output_path = json_path.parent / f"{json_path.stem}-table-chunks.json"
+        output_path = json_path.parent / f"{json_path.stem}-table.json"
     
-    output_data = [table.to_dict() for table in tables]
+    # 构建新格式: {document: {...}, tables: [...]}
+    doc_context = tables[0].document_context if tables else DocumentContext()
+    
+    output_data = {
+        "document": {
+            "source": json_path.stem,
+            "company": doc_context.company_short,
+            "company_full": doc_context.company_name,
+            "stock_code": doc_context.stock_code,
+            "report_period": doc_context.report_period,
+            "report_type": doc_context.report_type,
+            "fiscal_year": doc_context.fiscal_year
+        },
+        "tables": [table.to_dict() for table in tables]
+    }
     
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(output_data, f, ensure_ascii=False, indent=2)
@@ -699,16 +696,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Process with LLM summarization
+  # Process with LLM summarization (using Ollama qwen3 by default)
   python process_table.py input.json -o tables.json
   
   # Extract only (no LLM)
   python process_table.py input.json -o tables.json --extract-only
   
 Environment variables:
-  TABLE_LLM_BASE_URL  - OpenAI-compatible API base URL
-  TABLE_LLM_API_KEY   - API key for the LLM service
-  TABLE_LLM_MODEL     - Model name to use for summarization
+  TABLE_LLM_BASE_URL  - LLM API base URL (default: http://localhost:11434/v1)
+  TABLE_LLM_API_KEY   - API key (default: ollama)
+  TABLE_LLM_MODEL     - Model name (default: qwen3:30b-a3b-instruct-2507-q4_K_M)
         """
     )
     
@@ -752,8 +749,9 @@ Environment variables:
     print(f"\n=== Table Summary ===")
     print(f"Total tables: {len(tables)}")
     for table in tables[:5]:
-        section = table.metadata.get('section', 'N/A')
-        page = table.metadata.get('page_display', table.page + 1)
+        section_path = table.metadata.get('section_path', [])
+        section = " > ".join(section_path) if section_path else 'N/A'
+        page = table.page + 1  # 转为1-based显示
         print(f"\n[{table.id}] Page {page}")
         print(f"  Section: {section}")
         if table.content:

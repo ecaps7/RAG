@@ -150,8 +150,8 @@ def rerank_node(state: AgentState) -> dict:
             ) for chunk in cache.fused_results
         ]
         # 执行重排
-        logger.info(f"[rerank_node] 执行重排，top_k=8")
-        reranked_search_results = retrieval_manager.rerank(state["current_query"], search_results, top_k=8)
+        logger.info(f"[rerank_node] 执行重排，top_k=10")
+        reranked_search_results = retrieval_manager.rerank(state["current_query"], search_results, top_k=10)
         logger.info(f"[rerank_node] 重排完成，结果数: {len(reranked_search_results)}")
         chunks = retrieval_manager.local_retriever._to_chunks(reranked_search_results)
         cache.reranked_results = chunks
@@ -409,13 +409,20 @@ def final_output_node(state: AgentState) -> dict:
 
 # ================= 条件路由实现 =================
 
+def terminate_conditional(state: AgentState) -> str:
+    if state["termination"].should_terminate:
+        logger.info(f"[terminate_conditional] 终止条件触发: {state['termination'].reason}")
+        return "answer_generation"
+    else:
+        return "continue"
+
 def reasoning_conditional(state: AgentState) -> str:
     """推理分析器条件路由 - 智能决策"""
     
-    # 1. 优先检查终止条件
-    if state["termination"].should_terminate:
-        logger.info(f"[reasoning_conditional] 终止条件触发: {state['termination'].reason}")
-        return "answer_generation"  # 强制生成答案
+    # # 1. 优先检查终止条件
+    # if state["termination"].should_terminate:
+    #     logger.info(f"[reasoning_conditional] 终止条件触发: {state['termination'].reason}")
+    #     return "answer_generation"  # 强制生成答案
     
     # 2. 信息充足，直接生成
     if state.get("information_sufficient", False):
