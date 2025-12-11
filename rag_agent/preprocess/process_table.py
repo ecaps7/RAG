@@ -44,18 +44,18 @@ class TableConfig:
         """Load defaults from environment if not provided."""
         if not self.api_base_url:
             self.api_base_url = os.getenv(
-                "TABLE_LLM_BASE_URL", 
-                "http://localhost:11434/v1"  # Ollama OpenAI-compatible API
+                "TABLE_LLM_BASE_URL",
+                os.getenv("LLM_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
             )
         if not self.api_key:
             self.api_key = os.getenv(
-                "TABLE_LLM_API_KEY", 
-                "ollama"  # Ollama doesn't require real API key
+                "TABLE_LLM_API_KEY",
+                os.getenv("LLM_API_KEY", os.getenv("DASHSCOPE_API_KEY", ""))
             )
         if not self.model:
             self.model = os.getenv(
-                "TABLE_LLM_MODEL", 
-                "qwen3:30b-a3b-instruct-2507-q4_K_M"  # 统一使用qwen3模型
+                "TABLE_LLM_MODEL",
+                os.getenv("LLM_MODEL", "deepseek-v3.2")
             )
     
     @classmethod
@@ -703,9 +703,9 @@ Examples:
   python process_table.py input.json -o tables.json --extract-only
   
 Environment variables:
-  TABLE_LLM_BASE_URL  - LLM API base URL (default: http://localhost:11434/v1)
-  TABLE_LLM_API_KEY   - API key (default: ollama)
-  TABLE_LLM_MODEL     - Model name (default: qwen3:30b-a3b-instruct-2507-q4_K_M)
+  TABLE_LLM_BASE_URL  - LLM API base URL (default: uses LLM_API_BASE or https://dashscope.aliyuncs.com/compatible-mode/v1)
+  TABLE_LLM_API_KEY   - API key (default: uses LLM_API_KEY or DASHSCOPE_API_KEY)
+  TABLE_LLM_MODEL     - Model name (default: uses LLM_MODEL or deepseek-v3.2)
         """
     )
     
